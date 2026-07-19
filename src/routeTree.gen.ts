@@ -10,33 +10,53 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as ApiDriveFoldersRouteImport } from './routes/api/drive/folders'
+import { Route as ApiDriveUploadRouteImport } from './routes/api/drive/upload'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiDriveFoldersRoute = ApiDriveFoldersRouteImport.update({
+  id: '/api/drive/folders',
+  path: '/api/drive/folders',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiDriveUploadRoute = ApiDriveUploadRouteImport.update({
+  id: '/api/drive/upload',
+  path: '/api/drive/upload',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/api/drive/folders': typeof ApiDriveFoldersRoute
+  '/api/drive/upload': typeof ApiDriveUploadRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/api/drive/folders': typeof ApiDriveFoldersRoute
+  '/api/drive/upload': typeof ApiDriveUploadRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/api/drive/folders': typeof ApiDriveFoldersRoute
+  '/api/drive/upload': typeof ApiDriveUploadRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/'
+  fullPaths: '/' | '/api/drive/folders' | '/api/drive/upload'
   fileRoutesByTo: FileRoutesByTo
-  to: '/'
-  id: '__root__' | '/'
+  to: '/' | '/api/drive/folders' | '/api/drive/upload'
+  id: '__root__' | '/' | '/api/drive/folders' | '/api/drive/upload'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  ApiDriveFoldersRoute: typeof ApiDriveFoldersRoute
+  ApiDriveUploadRoute: typeof ApiDriveUploadRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -48,11 +68,27 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/drive/folders': {
+      id: '/api/drive/folders'
+      path: '/api/drive/folders'
+      fullPath: '/api/drive/folders'
+      preLoaderRoute: typeof ApiDriveFoldersRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/drive/upload': {
+      id: '/api/drive/upload'
+      path: '/api/drive/upload'
+      fullPath: '/api/drive/upload'
+      preLoaderRoute: typeof ApiDriveUploadRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  ApiDriveFoldersRoute: ApiDriveFoldersRoute,
+  ApiDriveUploadRoute: ApiDriveUploadRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
