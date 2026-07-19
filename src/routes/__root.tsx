@@ -96,6 +96,7 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
       { rel: "manifest", href: "/manifest.webmanifest" },
     ],
   }),
+  loader: () => getClerkPublishableKey(),
   shellComponent: RootShell,
   component: RootComponent,
   notFoundComponent: NotFoundComponent,
@@ -118,11 +119,26 @@ function RootShell({ children }: { children: ReactNode }) {
 
 function RootComponent() {
   const { queryClient } = Route.useRouteContext();
+  const { publishableKey } = Route.useLoaderData();
 
   return (
-    <QueryClientProvider client={queryClient}>
-      {/* Required: nested routes render here. Removing <Outlet /> breaks all child routes. */}
-      <Outlet />
-    </QueryClientProvider>
+    <ClerkProvider publishableKey={publishableKey} afterSignOutUrl="/">
+      <QueryClientProvider client={queryClient}>
+        <div className="fixed right-3 top-3 z-50 flex items-center gap-2">
+          <SignedOut>
+            <SignInButton mode="modal">
+              <button className="rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground shadow hover:brightness-110">
+                Sign in
+              </button>
+            </SignInButton>
+          </SignedOut>
+          <SignedIn>
+            <UserButton afterSignOutUrl="/" />
+          </SignedIn>
+        </div>
+        {/* Required: nested routes render here. Removing <Outlet /> breaks all child routes. */}
+        <Outlet />
+      </QueryClientProvider>
+    </ClerkProvider>
   );
 }
