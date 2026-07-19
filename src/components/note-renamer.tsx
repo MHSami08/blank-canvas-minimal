@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import JSZip from "jszip";
 import Cropper, { type Area } from "react-easy-crop";
 import { Footer } from "@/components/footer";
+import { DriveUpload } from "@/components/drive-upload";
 
 import {
   DndContext,
@@ -823,6 +824,12 @@ export function NoteRenamer() {
                 {zipping ? "Preparing ZIP…" : "Download ZIP"}
               </Button>
             </div>
+            <DriveUpload
+              files={items.map((it, i) => ({
+                file: it.file,
+                name: previews[i],
+              }))}
+            />
           </section>
         )}
       </main>
