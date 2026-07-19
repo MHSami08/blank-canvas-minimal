@@ -82,10 +82,14 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
       { title: "Page Renamer Pro — Batch rename notebook photos" },
       { name: "description", content: "Upload notebook page images, rename them in order with a base name and page numbers, and download as a ZIP. Runs entirely in your browser." },
       { name: "theme-color", content: "#0d111c" },
-      { property: "og:title", content: "page Renamer Pro" },
-      { property: "og:description", content: "Batch rename notebook page images and download as ZIP — 100% client-side." },
+      { property: "og:title", content: "Page Renamer Pro — Batch rename notebook photos" },
+      { property: "og:description", content: "Upload notebook page images, rename them in order with a base name and page numbers, and download as a ZIP. Runs entirely in your browser." },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary_large_image" },
+      { name: "twitter:title", content: "Page Renamer Pro — Batch rename notebook photos" },
+      { name: "twitter:description", content: "Upload notebook page images, rename them in order with a base name and page numbers, and download as a ZIP. Runs entirely in your browser." },
+      { property: "og:image", content: "https://pub-bb2e103a32db4e198524a2e9ed8f35b4.r2.dev/01ea7e7d-a3ef-4354-8b0f-57c8f7ab2619/id-preview-a6eeeb8a--51092877-1ff1-46d3-a910-14a1de5aebf8.lovable.app-1784421521109.png" },
+      { name: "twitter:image", content: "https://pub-bb2e103a32db4e198524a2e9ed8f35b4.r2.dev/01ea7e7d-a3ef-4354-8b0f-57c8f7ab2619/id-preview-a6eeeb8a--51092877-1ff1-46d3-a910-14a1de5aebf8.lovable.app-1784421521109.png" },
     ],
     links: [
       {
