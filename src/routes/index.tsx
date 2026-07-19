@@ -1,9 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
+import { NoteRenamer } from "@/components/note-renamer";
 
 export const Route = createFileRoute("/")({
-  component: Index,
+  component: NoteRenamer,
 });
-
-function Index() {
-  return <div className="min-h-screen bg-background" />;
-}
