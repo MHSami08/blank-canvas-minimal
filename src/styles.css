@@ -137,6 +137,17 @@
   --sidebar-ring: oklch(0.551 0.027 264.364);
 }
 
+@utility no-spinner {
+  -moz-appearance: textfield;
+  appearance: textfield;
+
+  &::-webkit-outer-spin-button,
+  &::-webkit-inner-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+  }
+}
+
 @layer base {
   * {
     border-color: var(--color-border);
@@ -145,5 +156,15 @@
   body {
     background-color: var(--color-background);
     color: var(--color-foreground);
+  }
+  
+/* ব্রাউজারের অটোফিল ব্যাকগ্রাউন্ড ফিক্স */
+  input:-webkit-autofill,
+  input:-webkit-autofill:hover, 
+  input:-webkit-autofill:focus, 
+  input:-webkit-autofill:active {
+    -webkit-box-shadow: 0 0 0 30px var(--color-background) inset !important;
+    transition: background-color 5000s ease-in-out 0s;
+    -webkit-text-fill-color: var(--color-foreground) !important;
   }
 }

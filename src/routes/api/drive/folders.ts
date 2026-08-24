@@ -1,10 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
-import {
-  getFolderName,
-  getRootFolderId,
-  listDriveSubfolders,
-  requireUploader,
-} from "@/lib/drive.server";
+import { requireUploader } from "@/lib/drive-auth.server";
+import { getFolderName, getRootFolderId, listSubfolders } from "@/lib/google-drive.server";
 
 export const Route = createFileRoute("/api/drive/folders")({
   server: {
@@ -21,18 +17,24 @@ export const Route = createFileRoute("/api/drive/folders")({
           const rootId = getRootFolderId();
           const parent = url.searchParams.get("parent") || rootId;
           const [folders, name] = await Promise.all([
-            listDriveSubfolders(parent),
+            listSubfolders(parent),
             getFolderName(parent),
           ]);
-          return Response.json({
-            currentId: parent,
-            currentName: name,
-            rootId,
-            folders,
-          });
+          return Response.json({ currentId: parent, currentName: name, rootId, folders });
         } catch (e) {
           const msg = e instanceof Error ? e.message : String(e);
           console.error("drive/folders error:", msg);
+          // With the drive.file scope, a folder the app was never granted looks
+          // like it doesn't exist. Surface that as a distinct, actionable state.
+          if (msg.includes("[404]") || msg.includes("[403]") || msg.includes("File not found")) {
+            return Response.json(
+              {
+                error: "Drive folder access has not been granted to this app yet.",
+                code: "drive_not_granted",
+              },
+              { status: 409 },
+            );
+          }
           return Response.json({ error: msg }, { status: 500 });
         }
       },

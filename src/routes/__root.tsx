@@ -4,11 +4,13 @@ import {
   Link,
   createRootRouteWithContext,
   useRouter,
+  useRouterState,
   HeadContent,
   Scripts,
 } from "@tanstack/react-router";
 import { useEffect, type ReactNode } from "react";
 import { ClerkProvider, SignedIn, SignedOut, SignInButton, UserButton } from "@clerk/clerk-react";
+import { Settings as SettingsIcon } from "lucide-react";
 
 import appCss from "../styles.css?url";
 import { reportLovableError } from "../lib/lovable-error-reporting";
@@ -124,11 +126,51 @@ function RootShell({ children }: { children: ReactNode }) {
 function RootComponent() {
   const { queryClient } = Route.useRouteContext();
   const { publishableKey } = Route.useLoaderData();
+  const pathname = useRouterState({ select: (s) => s.location.pathname });
+  const showHeaderControls = pathname === "/";
 
   return (
-    <ClerkProvider publishableKey={publishableKey} afterSignOutUrl="/">
+    <ClerkProvider
+      publishableKey={publishableKey}
+      afterSignOutUrl="/"
+      appearance={{
+        variables: {
+          colorBackground: "#0d111c",
+          colorText: "#f5f7fb",
+          colorTextSecondary: "#a5adc2",
+          colorPrimary: "#8b7cff",
+          colorInputBackground: "#171c2b",
+          colorInputText: "#f5f7fb",
+          colorNeutral: "#f5f7fb",
+        },
+        elements: {
+          userButtonAvatarBox: { width: "40px", height: "40px" },
+          userButtonPopoverCard: {
+            backgroundColor: "#0d111c",
+            border: "1px solid rgba(255,255,255,0.08)",
+          },
+          userButtonPopoverActionButton: { color: "#f5f7fb" },
+          userButtonPopoverActionButtonText: { color: "#f5f7fb" },
+          userButtonPopoverActionButtonIcon: { color: "#f5f7fb" },
+          userButtonPopoverFooter: { 
+            backgroundColor: "#0d111c", // Your dark background color
+            backgroundImage: "linear-gradient(45deg, rgba(139, 124, 255, 0.1) 25%, transparent 25%, transparent 50%, rgba(139, 124, 255, 0.1) 50%, rgba(139, 124, 255, 0.1) 75%, transparent 75%, transparent)",
+            backgroundSize: "40px 40px",
+           },
+          },
+        }}
+      >
       <QueryClientProvider client={queryClient}>
-        <div className="fixed right-3 top-3 z-50 flex items-center gap-2">
+        {showHeaderControls ? (
+        <div className="fixed right-3 top-3 z-50 flex items-center" style={{ gap: "5px" }}>
+          <button
+            type="button"
+            onClick={() => window.dispatchEvent(new CustomEvent("open-app-settings"))}
+            aria-label="Settings"
+            className="grid h-10 w-10 place-items-center rounded-md text-foreground hover:text-primary"
+          >
+            <SettingsIcon className="h-6 w-6" />
+          </button>
           <SignedOut>
             <SignInButton mode="modal">
               <button className="rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground shadow hover:brightness-110">
@@ -140,6 +182,8 @@ function RootComponent() {
             <UserButton afterSignOutUrl="/" />
           </SignedIn>
         </div>
+        ) : null}
+
         {/* Required: nested routes render here. Removing <Outlet /> breaks all child routes. */}
         <Outlet />
       </QueryClientProvider>

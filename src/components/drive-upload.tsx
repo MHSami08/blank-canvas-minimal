@@ -1,21 +1,118 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useAuth, useUser, SignInButton, SignedIn, SignedOut } from "@clerk/clerk-react";
 import { Button } from "@/components/ui/button";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { UploadCloud, FolderOpen, ChevronRight, Loader2, CheckCircle2, AlertCircle, ArrowLeft } from "lucide-react";
+import { UploadCloud, FolderOpen, ChevronRight, Loader2, CheckCircle2, AlertCircle, ArrowLeft, Folder, Lock, MessageCircle, Pause, Play, WifiOff, TestTube } from "lucide-react";
+import { cn } from "@/lib/utils";
 
-type Folder = { id: string; name: string };
+type FolderType = { id: string; name: string };
 type FolderResponse = {
   currentId: string;
   currentName: string;
   rootId: string;
-  folders: Folder[];
+  folders: FolderType[];
 };
 
 type Props = {
   files: { file: Blob; name: string }[];
 };
 
+function RequestAccessNote({ user }: { user: ReturnType<typeof useUser>["user"] }) {
+  const ADMIN_PHONE = "8801724583309";
+  const firstName = user?.firstName ?? "";
+  const nickname = (user?.username as string | undefined) ?? "";
+  const displayName = [firstName, nickname].filter(Boolean).join(" ") || user?.fullName || "—";
+  const email = user?.primaryEmailAddress?.emailAddress ?? "—";
+  const text = [
+    "Request to upload via Page Renamer Pro",
+    "",
+    `My name is : ${displayName}`,
+    `my Gmail address : ${email}`,
+    "Please Grant my access to upload via the Webapp",
+  ].join("\n");
+  const href = `https://wa.me/${ADMIN_PHONE}?text=${encodeURIComponent(text)}`;
+  return (
+    <div className="mt-4 rounded-xl border border-border/60 bg-muted/30 p-4">
+      <div className="flex items-start gap-3">
+        <div className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-primary/10 text-primary">
+          <Lock className="h-4 w-4" />
+        </div>
+        <p className="text-xs leading-relaxed text-muted-foreground">
+          You don't have access to upload via this website. Please request access to the admin.
+        </p>
+      </div>
+      <a href={href} target="_blank" rel="noopener noreferrer" className="mt-4 block">
+        <Button
+          size="lg"
+          className={cn(
+            "h-11 w-full font-semibold border-0 transition-all active:scale-[0.99]",
+            "bg-[image:var(--gradient-primary)] text-primary-foreground shadow-[var(--shadow-primary)] hover:brightness-110"
+          )}
+        >
+          <MessageCircle className="mr-2 h-4 w-4" />
+          Request access
+        </Button>
+      </a>
+    </div>
+  );
+}
+
+/** Shown instead of raw Google auth errors (e.g. invalid_grant): the app's Drive
+ *  connection needs the admin to re-authorize. Framed as "out of fuel". */
+function isFuelEmptyError(msg: string | null): boolean {
+  if (!msg) return false;
+  const m = msg.toLowerCase();
+  return (
+    m.includes("invalid_grant") ||
+    m.includes("token refresh failed") ||
+    m.includes("refresh_token") ||
+    m.includes("unauthorized_client") ||
+    m.includes("missing required env")
+  );
+}
+
+function FuelEmptyNote({ user }: { user: ReturnType<typeof useUser>["user"] }) {
+  const ADMIN_PHONE = "8801724583309";
+  const firstName = user?.firstName ?? "";
+  const nickname = (user?.username as string | undefined) ?? "";
+  const displayName = [firstName, nickname].filter(Boolean).join(" ") || user?.fullName || "—";
+  const email = user?.primaryEmailAddress?.emailAddress ?? "—";
+  const text = [
+    "The Page Renamer Pro website's Drive upload engine fuel is run out",
+    "",
+    `My name is : ${displayName}`,
+    `My Gmail : ${email}`,
+    "",
+    "Please refuel the Drive Upload Fuel.",
+  ].join("\n");
+  const href = `https://wa.me/${ADMIN_PHONE}?text=${encodeURIComponent(text)}`;
+  return (
+    <div className="mt-3 overflow-hidden rounded-xl border border-amber-500/25 bg-amber-500/[0.06] p-4">
+      <div className="flex items-start gap-3">
+        <div className="relative grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-amber-500/10 text-amber-400">
+          <TestTube className="h-5 w-5 rotate-12" />
+        </div>
+        <div className="min-w-0">
+          <p className="text-sm font-semibold text-amber-300">Website have no Drive upload fuel !</p>
+          <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+            The Drive upload engine is out of fuel. Please ask the admin to refuel it before uploading more files.
+          </p>
+        </div>
+      </div>
+      <a href={href} target="_blank" rel="noopener noreferrer" className="mt-4 block">
+        <Button
+          size="lg"
+          className={cn(
+            "h-11 w-full font-semibold border-0 transition-all active:scale-[0.99]",
+            "bg-[image:var(--gradient-primary)] text-primary-foreground shadow-[var(--shadow-primary)] hover:brightness-110",
+          )}
+        >
+          Request Refuel
+        </Button>
+      </a>
+    </div>
+  );
+}
 export function DriveUpload({ files }: Props) {
   const { isSignedIn, user, isLoaded } = useUser();
   const { getToken } = useAuth();
@@ -30,6 +127,45 @@ export function DriveUpload({ files }: Props) {
   const [uploading, setUploading] = useState(false);
   const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
   const [uploadDone, setUploadDone] = useState<string | null>(null);
+  const [paused, setPaused] = useState(false);
+  const [offline, setOffline] = useState<boolean>(
+    typeof navigator !== "undefined" ? !navigator.onLine : false,
+  );
+  const [completed, setCompleted] = useState<Set<string>>(new Set());
+  const pausedRef = useRef(false);
+  const PROGRESS_KEY = "drive-upload-progress-v1";
+
+  useEffect(() => {
+    if (!data) return;
+    try {
+      const raw = localStorage.getItem(PROGRESS_KEY);
+      if (!raw) { setCompleted(new Set()); return; }
+      const parsed = JSON.parse(raw) as { folderId?: string; names?: string[] };
+      if (parsed.folderId === data.currentId && Array.isArray(parsed.names)) {
+        setCompleted(new Set(parsed.names));
+      } else {
+        setCompleted(new Set());
+      }
+    } catch { setCompleted(new Set()); }
+  }, [data?.currentId]);
+
+  function persistCompleted(folderId: string, set: Set<string>) {
+    try {
+      if (set.size === 0) localStorage.removeItem(PROGRESS_KEY);
+      else localStorage.setItem(PROGRESS_KEY, JSON.stringify({ folderId, names: Array.from(set) }));
+    } catch { /* ignore */ }
+  }
+
+  useEffect(() => {
+    const onOff = () => { setOffline(true); pausedRef.current = true; setPaused(true); };
+    const onOn = () => setOffline(false);
+    window.addEventListener("offline", onOff);
+    window.addEventListener("online", onOn);
+    return () => {
+      window.removeEventListener("offline", onOff);
+      window.removeEventListener("online", onOn);
+    };
+  }, []);
 
   async function loadFolder(parentId: string | null) {
     setLoading(true);
@@ -60,7 +196,7 @@ export function DriveUpload({ files }: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isLoaded, isSignedIn, hasRole]);
 
-  function enterFolder(f: Folder) {
+  function enterFolder(f: FolderType) {
     setBreadcrumb((prev) => [...prev, { id: f.id, name: f.name }]);
     loadFolder(f.id);
   }
@@ -76,32 +212,99 @@ export function DriveUpload({ files }: Props) {
     loadFolder(target.id);
   }
 
-  async function handleUpload() {
-    if (!data || files.length === 0) return;
+  async function runUpload(initialCompleted: Set<string>) {
+    if (!data) return;
+    const folderId = data.currentId;
+    const pending = files.filter((f) => !initialCompleted.has(f.name));
+    if (pending.length === 0) {
+      setUploadDone(`All ${files.length} file${files.length === 1 ? "" : "s"} already uploaded to "${data.currentName}".`);
+      persistCompleted(folderId, new Set());
+      setCompleted(new Set());
+      return;
+    }
     setUploading(true);
     setError(null);
     setUploadDone(null);
-    setProgress({ done: 0, total: files.length });
-    try {
-      const token = await getToken();
-      for (let i = 0; i < files.length; i++) {
-        const { file, name } = files[i];
-        const form = new FormData();
-        form.set("folderId", data.currentId);
-        form.set("filename", name);
-        form.set("file", file, name);
-        const res = await fetch("/api/drive/upload", {
+    pausedRef.current = false;
+    setPaused(false);
+
+    const done = { count: initialCompleted.size };
+    setProgress({ done: done.count, total: files.length });
+    let cursor = 0;
+    let failure: Error | null = null;
+    const localCompleted = new Set(initialCompleted);
+
+    const isNetworkError = (e: unknown) =>
+      e instanceof TypeError || (typeof navigator !== "undefined" && !navigator.onLine);
+
+    const uploadOne = async (file: Blob, name: string, attempt = 0): Promise<void> => {
+      if (pausedRef.current) throw new Error("__paused__");
+      const token = await getToken({ skipCache: attempt > 0 });
+      const form = new FormData();
+      form.set("folderId", folderId);
+      form.set("filename", name);
+      form.set("file", file, name);
+      let res: Response;
+      try {
+        res = await fetch("/api/drive/upload", {
           method: "POST",
           headers: { authorization: `Bearer ${token ?? ""}` },
           body: form,
         });
-        if (!res.ok) {
-          const t = await res.text();
-          throw new Error(`Upload failed for ${name}: ${t}`);
+      } catch (e) {
+        if (isNetworkError(e)) {
+          pausedRef.current = true;
+          setPaused(true);
+          setOffline(true);
+          throw new Error("__paused__");
         }
-        setProgress({ done: i + 1, total: files.length });
+        throw e;
       }
-      setUploadDone(`Uploaded ${files.length} file${files.length === 1 ? "" : "s"} to "${data.currentName}".`);
+      if (res.ok) return;
+      const text = await res.text();
+      const retriable =
+        res.status === 401 || res.status === 403 || res.status === 429 || res.status >= 500;
+      if (retriable && attempt < 4) {
+        const delay = 500 * Math.pow(2, attempt) + Math.random() * 250;
+        await new Promise((r) => setTimeout(r, delay));
+        return uploadOne(file, name, attempt + 1);
+      }
+      throw new Error(`Upload failed for ${name} [${res.status}]: ${text}`);
+    };
+
+    const worker = async () => {
+      while (true) {
+        if (failure || pausedRef.current) return;
+        const i = cursor++;
+        if (i >= pending.length) return;
+        const { file, name } = pending[i];
+        if (localCompleted.has(name)) continue;
+        try {
+          await uploadOne(file, name);
+        } catch (e) {
+          const msg = e instanceof Error ? e.message : String(e);
+          if (msg === "__paused__") return;
+          failure = e instanceof Error ? e : new Error(String(e));
+          return;
+        }
+        localCompleted.add(name);
+        done.count++;
+        persistCompleted(folderId, localCompleted);
+        setCompleted(new Set(localCompleted));
+        setProgress({ done: done.count, total: files.length });
+      }
+    };
+
+    try {
+      await Promise.all(
+        Array.from({ length: Math.min(3, pending.length) }, () => worker()),
+      );
+      if (failure) throw failure;
+      if (!pausedRef.current) {
+        setUploadDone(`Uploaded ${files.length} file${files.length === 1 ? "" : "s"} to "${data.currentName}".`);
+        persistCompleted(folderId, new Set());
+        setCompleted(new Set());
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -109,150 +312,259 @@ export function DriveUpload({ files }: Props) {
     }
   }
 
+  async function handleUpload() {
+    if (!data || files.length === 0) return;
+    await runUpload(completed);
+  }
+
+  function handlePause() {
+    pausedRef.current = true;
+    setPaused(true);
+  }
+
+  async function handleResume() {
+    if (!data) return;
+    await runUpload(completed);
+  }
+
   return (
-    <div className="mt-5 rounded-2xl border border-border bg-card p-5 shadow-sm">
-      <div className="flex items-center gap-2 text-primary">
-        <UploadCloud className="h-5 w-5" />
-        <h2 className="text-base font-semibold text-foreground">Upload to Google Drive</h2>
+    <div className="mt-6 rounded-2xl border border-border/80 bg-card/60 p-5 shadow-xl backdrop-blur-md">
+      {/* Header */}
+      <div className="flex items-center gap-2.5 pb-4 border-b border-border/40">
+        <div className="grid h-8 w-8 place-items-center rounded-lg bg-primary/10 text-primary">
+          <UploadCloud className="h-4 w-4" />
+        </div>
+        <div>
+          <h2 className="text-sm font-semibold text-foreground">Upload to Google Drive</h2>
+          <p className="text-xs text-muted-foreground">Save your renamed files directly to cloud</p>
+        </div>
       </div>
 
       <SignedOut>
-        <p className="mt-3 text-sm text-muted-foreground">
-          Sign in to upload the renamed files to Google Drive.
+        <p className="mt-4 text-xs text-muted-foreground leading-relaxed">
+          Sign in to upload your ordered and renamed notebook pages directly to your Google Drive workspace.
         </p>
-        <div className="mt-3">
+        <div className="mt-4">
           <SignInButton mode="modal">
-            <Button size="sm">Sign in</Button>
+            <Button size="sm" className="w-full sm:w-auto font-medium">Sign in to Drive</Button>
           </SignInButton>
         </div>
       </SignedOut>
 
       <SignedIn>
         {!hasRole ? (
-          <Alert className="mt-3">
-            <AlertCircle className="h-4 w-4" />
-            <AlertDescription>
-              Your account doesn't have upload permission. Ask the admin to grant the
-              <code className="mx-1 rounded bg-muted px-1 py-0.5 text-xs">mustakim-s-student</code>
-              role.
-            </AlertDescription>
-          </Alert>
+          <RequestAccessNote user={user} />
         ) : (
           <>
-            <div className="mt-3 flex flex-wrap items-center gap-1 text-sm text-muted-foreground">
+            {/* Interactive Breadcrumbs */}
+            <div className="mt-4 flex flex-wrap items-center gap-1.5 rounded-xl bg-muted/40 p-2 text-xs">
               <button
                 type="button"
                 onClick={() => goToCrumb(-1)}
-                className="rounded px-2 py-1 hover:bg-accent hover:text-foreground"
+                className={cn(
+                  "rounded-lg px-2.5 py-1 font-medium transition-colors hover:bg-background hover:text-foreground",
+                  breadcrumb.length === 0 ? "bg-background text-foreground shadow-sm" : "text-muted-foreground"
+                )}
               >
                 Root
               </button>
               {breadcrumb.map((c, i) => (
-                <span key={c.id} className="flex items-center gap-1">
-                  <ChevronRight className="h-3 w-3" />
+                <div key={c.id} className="flex items-center gap-1.5">
+                  <ChevronRight className="h-3 w-3 text-muted-foreground/60" />
                   <button
                     type="button"
                     onClick={() => goToCrumb(i)}
-                    className="rounded px-2 py-1 hover:bg-accent hover:text-foreground"
+                    className={cn(
+                      "rounded-lg px-2.5 py-1 font-medium max-w-[120px] truncate transition-colors hover:bg-background hover:text-foreground",
+                      i === breadcrumb.length - 1 ? "bg-background text-foreground shadow-sm" : "text-muted-foreground"
+                    )}
                   >
                     {c.name}
                   </button>
-                </span>
+                </div>
               ))}
             </div>
 
-            <div className="mt-3 rounded-lg border border-border bg-background">
+            {/* Folder Explorer Container */}
+            <div className="mt-3 overflow-hidden rounded-xl border border-border bg-background/50">
               {loading ? (
-                <div className="flex items-center justify-center gap-2 p-6 text-sm text-muted-foreground">
-                  <Loader2 className="h-4 w-4 animate-spin" /> Loading…
+                <div className="flex h-40 flex-col items-center justify-center gap-2 text-xs text-muted-foreground">
+                  <Loader2 className="h-5 w-5 animate-spin text-primary" />
+                  <span>Fetching directories...</span>
                 </div>
               ) : data ? (
-                <ul className="max-h-64 overflow-auto divide-y divide-border">
-                  {breadcrumb.length > 0 && (
-                    <li>
-                      <button
-                        type="button"
-                        onClick={() => goToCrumb(breadcrumb.length - 2)}
-                        className="flex w-full items-center gap-2 px-3 py-2 text-sm hover:bg-accent"
-                      >
-                        <ArrowLeft className="h-4 w-4" />
-                        <span>Back</span>
-                      </button>
-                    </li>
-                  )}
-                  {data.folders.length === 0 ? (
-                    <li className="px-3 py-4 text-center text-xs text-muted-foreground">
-                      No subfolders here.
-                    </li>
-                  ) : (
-                    data.folders.map((f) => (
-                      <li key={f.id}>
+                <div className="max-h-60 overflow-y-auto">
+                  <ul className="divide-y divide-border/40">
+                    {breadcrumb.length > 0 && (
+                      <li>
                         <button
                           type="button"
-                          onClick={() => enterFolder(f)}
-                          className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-accent"
+                          onClick={() => goToCrumb(breadcrumb.length - 2)}
+                          className="flex w-full items-center gap-2.5 px-4 py-3 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground"
                         >
-                          <FolderOpen className="h-4 w-4 text-primary" />
-                          <span className="flex-1 truncate">{f.name}</span>
-                          <ChevronRight className="h-4 w-4 text-muted-foreground" />
+                          <ArrowLeft className="h-3.5 w-3.5" />
+                          <span>Go back a directory</span>
                         </button>
                       </li>
-                    ))
-                  )}
-                </ul>
+                    )}
+                    {data.folders.length === 0 ? (
+                      <div className="flex h-28 flex-col items-center justify-center gap-1.5 text-center p-4">
+                        <Folder className="h-6 w-6 text-muted-foreground/40 stroke-[1.5]" />
+                        <span className="text-xs text-muted-foreground">No subfolders found inside this directory.</span>
+                      </div>
+                    ) : (
+                      data.folders.map((f) => (
+                        <li key={f.id}>
+                          <button
+                            type="button"
+                            onClick={() => enterFolder(f)}
+                            className="flex w-full items-center gap-3 px-4 py-3 text-left text-xs font-medium transition-colors hover:bg-muted/50 group"
+                          >
+                            <div className="grid h-7 w-7 place-items-center rounded-lg bg-primary/5 text-primary/80 group-hover:bg-primary/10 group-hover:text-primary">
+                              <FolderOpen className="h-4 w-4" />
+                            </div>
+                            <span className="flex-1 truncate text-foreground/90 group-hover:text-foreground">{f.name}</span>
+                            <ChevronRight className="h-3.5 w-3.5 text-muted-foreground/40 transition-transform group-hover:translate-x-0.5 group-hover:text-muted-foreground" />
+                          </button>
+                        </li>
+                      ))
+                    )}
+                  </ul>
+                </div>
               ) : null}
             </div>
 
-            <p className="mt-3 text-xs text-muted-foreground">
-              Current folder: <span className="font-medium text-foreground">{data?.currentName ?? "—"}</span>
-            </p>
+            {/* Current Target Safe-zone */}
+            <div className="mt-3 flex items-center justify-between px-1 text-[11px] text-muted-foreground">
+              <span>Destination path:</span>
+              <span className="font-semibold text-foreground max-w-[200px] truncate">
+                {data?.currentName ? `/${data.currentName}` : "—"}
+              </span>
+            </div>
 
-            {error && (
-              <Alert variant="destructive" className="mt-3">
+            {/* Notifications & Status Alerts */}
+            {error && isFuelEmptyError(error) && <FuelEmptyNote user={user} />}
+
+            {error && !isFuelEmptyError(error) && (
+              <Alert variant="destructive" className="mt-3 border-destructive/20 bg-destructive/5 text-xs">
                 <AlertCircle className="h-4 w-4" />
-                <AlertDescription className="break-words">{error}</AlertDescription>
+                <AlertDescription className="break-words font-medium">{error}</AlertDescription>
               </Alert>
             )}
 
             {uploadDone && (
-              <Alert className="mt-3">
-                <CheckCircle2 className="h-4 w-4" />
-                <AlertDescription>{uploadDone}</AlertDescription>
+              <Alert className="mt-3 border-emerald-500/20 bg-emerald-500/5 text-xs text-emerald-500">
+                <CheckCircle2 className="h-4 w-4 text-emerald-500" />
+                <AlertDescription className="font-medium">{uploadDone}</AlertDescription>
               </Alert>
             )}
 
-            {progress && uploading && (
-              <div className="mt-3">
-                <div className="h-2 w-full overflow-hidden rounded-full bg-muted">
-                  <div
-                    className="h-full bg-primary transition-all"
-                    style={{ width: `${(progress.done / progress.total) * 100}%` }}
-                  />
-                </div>
-                <p className="mt-1 text-xs text-muted-foreground">
-                  {progress.done} / {progress.total} uploaded
-                </p>
-              </div>
-            )}
+            {!isFuelEmptyError(error) && (
+              <>
+                {/* Progress Track */}
+                {progress && (uploading || paused) && (
+                  <div className={cn(
+                    "mt-4 rounded-xl border p-3",
+                    paused ? "border-amber-500/30 bg-amber-500/5" : "border-border/60 bg-muted/20"
+                  )}>
+                    <div className="flex items-center justify-between text-[11px] font-medium mb-1.5">
+                      <span className={cn("flex items-center gap-1.5", paused ? "text-amber-500" : "text-muted-foreground")}>
+                        {paused ? (
+                          <>
+                            <Pause className="h-3.5 w-3.5 fill-current" />
+                            {offline ? "Paused — you're offline" : "Paused"}
+                          </>
+                        ) : (
+                          <>Uploading package...</>
+                        )}
+                      </span>
+                      <span className="font-mono text-foreground">{Math.round((progress.done / progress.total) * 100)}%</span>
+                    </div>
+                    <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted">
+                      <div
+                        className={cn(
+                          "h-full transition-all duration-300",
+                          paused ? "bg-amber-500" : "bg-primary"
+                        )}
+                        style={{ width: `${(progress.done / progress.total) * 100}%` }}
+                      />
+                    </div>
+                    <p className="mt-1.5 text-[10px] text-muted-foreground/80">
+                      Processed {progress.done} of {progress.total} files
+                    </p>
+                  </div>
+                )}
 
-            <Button
-              size="lg"
-              className="mt-4 h-12 w-full"
-              onClick={handleUpload}
-              disabled={uploading || !data || files.length === 0}
-            >
-              {uploading ? (
-                <>
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  Uploading…
-                </>
-              ) : (
-                <>
-                  <UploadCloud className="mr-2 h-5 w-5" />
-                  Upload {files.length} file{files.length === 1 ? "" : "s"} here
-                </>
-              )}
-            </Button>
+                {/* Resume banner when session has unfinished uploads and we're idle */}
+                {!uploading && !paused && completed.size > 0 && completed.size < files.length && (
+                  <Alert className="mt-3 border-amber-500/20 bg-amber-500/5 text-xs text-amber-500">
+                    <Pause className="h-4 w-4 fill-current" />
+                    <AlertDescription className="font-medium">
+                      Previous upload paused — {completed.size} of {files.length} done. Tap Resume to continue.
+                    </AlertDescription>
+                  </Alert>
+                )}
+
+                {/* Action buttons */}
+                {paused ? (
+                  <div className="mt-4 flex gap-2">
+                    <Button
+                      size="lg"
+                      className={cn(
+                        "h-12 flex-1 font-semibold border-0 transition-all active:scale-[0.99]",
+                        "bg-[image:var(--gradient-primary)] text-primary-foreground shadow-[var(--shadow-primary)] hover:brightness-110"
+                      )}
+                      onClick={handleResume}
+                      disabled={offline}
+                    >
+                      {offline ? (
+                        <><WifiOff className="mr-2 h-4 w-4" />Waiting for internet…</>
+                      ) : (
+                        <><Play className="mr-2 h-4 w-4 fill-current" />Resume upload</>
+                      )}
+                    </Button>
+                  </div>
+                ) : uploading ? (
+                  <div className="mt-4 flex gap-2">
+                    <Button
+                      size="lg"
+                      variant="outline"
+                      className="h-12 flex-1 font-semibold"
+                      onClick={handlePause}
+                    >
+                      <Pause className="mr-2 h-4 w-4 fill-current" />
+                      Pause
+                    </Button>
+                    <Button
+                      size="lg"
+                      disabled
+                      className={cn(
+                        "h-12 flex-1 font-semibold border-0",
+                        "bg-[image:var(--gradient-primary)] text-primary-foreground shadow-[var(--shadow-primary)]"
+                      )}
+                    >
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      Pushing…
+                    </Button>
+                  </div>
+                ) : (
+                  <Button
+                    size="lg"
+                    className={cn(
+                      "mt-4 h-12 w-full font-semibold border-0 transition-all active:scale-[0.99]",
+                      "bg-[image:var(--gradient-primary)] text-primary-foreground shadow-[var(--shadow-primary)] hover:brightness-110"
+                    )}
+                    onClick={handleUpload}
+                    disabled={!data || files.length === 0}
+                  >
+                    <UploadCloud className="mr-2 h-4 w-4" />
+                    {completed.size > 0 && completed.size < files.length
+                      ? `Resume upload (${files.length - completed.size} left)`
+                      : `Upload ${files.length} file${files.length === 1 ? "" : "s"} here`}
+                  </Button>
+                )}
+              </>
+            )}
           </>
         )}
       </SignedIn>

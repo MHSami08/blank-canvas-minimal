@@ -22,6 +22,7 @@ import {
   verticalListSortingStrategy,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
+import { restrictToVerticalAxis, restrictToParentElement } from "@dnd-kit/modifiers";
 import {
   GripVertical,
   Trash2,
@@ -42,6 +43,7 @@ import {
   MoreVertical,
   Settings as SettingsIcon,
 } from "lucide-react";
+import { Check } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -116,6 +118,13 @@ function pageLabel(n: number, lang: Lang) {
 
 function buildFileName(base: string, page: number, ext: string, lang: Lang) {
   return `${base.trim()}  ${pageLabel(page, lang)}.${ext}`;
+}
+
+function renumberItems(list: ImgItem[]): ImgItem[] {
+  const rank = [...list]
+    .sort((a, b) => a.uploadOrder - b.uploadOrder)
+    .reduce((m, it, i) => { m.set(it.id, i + 1); return m; }, new Map<string, number>());
+  return list.map((it) => ({ ...it, uploadOrder: rank.get(it.id)! }));
 }
 
 type RemovedItem = { item: ImgItem; index: number };
@@ -215,21 +224,29 @@ export function NoteRenamer() {
   const [error, setError] = useState<string | null>(null);
   const [renamed, setRenamed] = useState(false);
   const [zipping, setZipping] = useState(false);
-  const [lang, setLang] = useState<Lang>("en");
+  const [lang, setLang] = useState<Lang>("bn");
   const [lastRemoved, setLastRemoved] = useState<RemovedItem | null>(null);
   const [dupInfo, setDupInfo] = useState<{ count: number; names: string[] } | null>(null);
   const [viewerId, setViewerId] = useState<string | null>(null);
   const [cropId, setCropId] = useState<string | null>(null);
   const [batchRatioOpen, setBatchRatioOpen] = useState(false);
   const [batchBusy, setBatchBusy] = useState(false);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
   const [restoreDialog, setRestoreDialog] = useState<SavedSession | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  useEffect(() => {
+    const h = () => setSettingsOpen(true);
+    window.addEventListener("open-app-settings", h);
+    return () => window.removeEventListener("open-app-settings", h);
+  }, []);
   const [sessionReady, setSessionReady] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const undoTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const dupTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const orderCounterRef = useRef(0);
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastRemovedRef = useRef<RemovedItem | null>(null);
+  useEffect(() => { lastRemovedRef.current = lastRemoved; }, [lastRemoved]);
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
@@ -337,6 +354,9 @@ export function NoteRenamer() {
     return null;
   }, [items.length, baseName, validStart]);
 
+  const [dragOver, setDragOver] = useState(false);
+
+
   const previews = useMemo(() => {
     if (!baseName.trim() || !validStart) return null;
     return items.map((it, i) => buildFileName(baseName, startNum + i, it.ext, lang));
@@ -349,7 +369,17 @@ export function NoteRenamer() {
     if (incoming.length === 0) return;
     setRenamed(false);
 
-    const existingSigs = new Set(items.map((i) => i.sig));
+    // If a delete is pending undo, finalize it first so uploadOrder stays gap-free.
+    let baseItems = items;
+    const pending = lastRemovedRef.current;
+    if (pending) {
+      if (undoTimerRef.current) { clearTimeout(undoTimerRef.current); undoTimerRef.current = null; }
+      revokeItemUrls(pending.item);
+      lastRemovedRef.current = null;
+      setLastRemoved(null);
+      baseItems = renumberItems(baseItems);
+    }
+    const existingSigs = new Set(baseItems.map((i) => i.sig));
     const seenInBatch = new Set<string>();
     const mapped: ImgItem[] = [];
     const skipped: string[] = [];
@@ -362,7 +392,6 @@ export function NoteRenamer() {
         continue;
       }
       seenInBatch.add(sig);
-      orderCounterRef.current += 1;
       const url = URL.createObjectURL(f);
       mapped.push({
         id: `${Date.now()}-${i}-${f.name}`,
@@ -373,11 +402,18 @@ export function NoteRenamer() {
         originalName: f.name,
         ext: getExt(f.name),
         sig,
-        uploadOrder: orderCounterRef.current,
+        uploadOrder: baseItems.length + mapped.length + 1,
       });
     }
 
-    if (mapped.length > 0) setItems((prev) => [...prev, ...mapped]);
+    if (mapped.length > 0) {
+      const next = pending ? [...baseItems, ...mapped] : [...baseItems, ...mapped];
+      orderCounterRef.current = next.length;
+      setItems(next);
+    } else if (pending) {
+      orderCounterRef.current = baseItems.length;
+      setItems(baseItems);
+    }
     if (skipped.length > 0) {
       setDupInfo({ count: skipped.length, names: skipped });
       if (dupTimerRef.current) clearTimeout(dupTimerRef.current);
@@ -391,6 +427,7 @@ export function NoteRenamer() {
   }
 
   function removeItem(id: string) {
+    setSelected((s) => { if (!s.has(id)) return s; const n = new Set(s); n.delete(id); return n; });
     setItems((prev) => {
       const idx = prev.findIndex((p) => p.id === id);
       if (idx === -1) return prev;
@@ -400,7 +437,12 @@ export function NoteRenamer() {
       undoTimerRef.current = setTimeout(() => {
         revokeItemUrls(gone);
         setLastRemoved((cur) => (cur?.item.id === gone.id ? null : cur));
-      }, 7000);
+        setItems((cur) => {
+          const renumbered = renumberItems(cur);
+          orderCounterRef.current = renumbered.length;
+          return renumbered;
+        });
+      }, 5000);
       return prev.filter((p) => p.id !== id);
     });
     setRenamed(false);
@@ -425,6 +467,7 @@ export function NoteRenamer() {
   function clearAll() {
     items.forEach(revokeItemUrls);
     setItems([]);
+    setSelected(new Set());
     setRenamed(false);
     orderCounterRef.current = 0;
     if (lastRemoved) {
@@ -437,21 +480,20 @@ export function NoteRenamer() {
     }
   }
 
-  async function applyBatchRatio(ratio: number) {
+  async function applyBatchRatio(ratio: number, targetIds?: Set<string>) {
     setBatchBusy(true);
     try {
       const updated = await Promise.all(
         items.map(async (it) => {
+          if (targetIds && !targetIds.has(it.id)) return it;
           try {
             const newFile = await centerCropFileToRatio(it.originalFile, it.ext, ratio);
-            revokeItemUrls(it);
+            if (it.url !== it.originalUrl) URL.revokeObjectURL(it.url);
             const newUrl = URL.createObjectURL(newFile);
             return {
               ...it,
               file: newFile,
               url: newUrl,
-              originalFile: newFile,
-              originalUrl: newUrl,
               cropped: true,
             };
           } catch {
@@ -462,6 +504,7 @@ export function NoteRenamer() {
       setItems(updated);
       setRenamed(false);
       setBatchRatioOpen(false);
+      setSelected(new Set());
     } finally {
       setBatchBusy(false);
     }
@@ -480,19 +523,35 @@ export function NoteRenamer() {
     setItems((prev) =>
       prev.map((p) => {
         if (p.id !== id) return p;
-        revokeItemUrls(p);
+        if (p.url !== p.originalUrl) URL.revokeObjectURL(p.url);
         return {
           ...p,
           file: newFile,
           url: newUrl,
-          originalFile: newFile,
-          originalUrl: newUrl,
           cropped: true,
         };
       }),
     );
     setRenamed(false);
   }
+
+  function restoreOriginal(id: string) {
+    setItems((prev) =>
+      prev.map((p) => {
+        if (p.id !== id) return p;
+        if (!p.cropped) return p;
+        if (p.url !== p.originalUrl) URL.revokeObjectURL(p.url);
+        return { ...p, file: p.originalFile, url: p.originalUrl, cropped: false };
+      }),
+    );
+    setRenamed(false);
+  }
+
+  function toggleSelect(id: string) {
+    setSelected((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; });
+  }
+  function selectAll() { setSelected(new Set(items.map((i) => i.id))); }
+  function clearSelection() { setSelected(new Set()); }
 
   function onDragEnd(e: DragEndEvent) {
     const { active, over } = e;
@@ -572,7 +631,7 @@ export function NoteRenamer() {
         }}
       />
       <header className="sticky top-0 z-20 border-b border-border bg-background/80 backdrop-blur-xl">
-        <div className="mx-auto flex max-w-3xl items-center gap-3 px-4 py-3">
+        <div className="flex w-full items-center gap-3 px-4 py-3 sm:px-6 lg:px-8">
           <div
             className="grid h-9 w-9 shrink-0 place-items-center rounded-xl text-primary-foreground shadow-lg"
             style={{ backgroundImage: "var(--gradient-primary)", boxShadow: "var(--shadow-primary)" }}
@@ -585,34 +644,54 @@ export function NoteRenamer() {
               Rename notebook pages in order
             </p>
           </div>
-          <button
-            type="button"
-            onClick={() => setSettingsOpen(true)}
-            aria-label="Settings"
-            className="grid h-9 w-9 shrink-0 place-items-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
-          >
-            <SettingsIcon className="h-4 w-4" />
-          </button>
         </div>
       </header>
 
-      <main className="mx-auto max-w-3xl px-4 pb-32 pt-6">
+      <main className="mx-auto max-w-3xl px-4 pb-32 pt-6 lg:max-w-5xl lg:px-8">
         <section className="mb-8">
           <StepHeader n={1} title="Upload images" subtitle="Order is preserved exactly as uploaded." />
           <button
             type="button"
             onClick={() => inputRef.current?.click()}
-            className="group flex w-full flex-col items-center justify-center gap-2 rounded-2xl border-2 border-dashed border-border bg-card px-4 py-10 text-center transition-all hover:border-primary hover:bg-accent/50 active:scale-[0.99]"
+            onDragOver={(e) => {
+              e.preventDefault();
+              if (!dragOver) setDragOver(true);
+            }}
+            onDragEnter={(e) => {
+              e.preventDefault();
+              setDragOver(true);
+            }}
+            onDragLeave={(e) => {
+              if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDragOver(false);
+            }}
+            onDrop={(e) => {
+              e.preventDefault();
+              setDragOver(false);
+              const dropped = Array.from(e.dataTransfer?.files ?? []).filter((f) =>
+                /^image\/(jpeg|png|webp)$/.test(f.type) || /\.(jpe?g|png|webp)$/i.test(f.name),
+              );
+              if (dropped.length) addFiles(dropped);
+            }}
+            className={`group flex w-full flex-col items-center justify-center gap-2 rounded-2xl border-2 border-dashed bg-card px-4 py-10 text-center outline-none transition-all focus:outline-none focus-visible:outline-none focus-visible:ring-0 hover:border-primary hover:bg-accent/50 active:scale-[0.99] ${
+              dragOver ? "border-primary bg-accent/60 ring-2 ring-primary/40" : "border-border"
+            }`}
+            style={{ WebkitTapHighlightColor: "transparent" }}
           >
             <div
-              className="grid h-12 w-12 place-items-center rounded-full text-primary-foreground shadow-md transition-transform group-hover:scale-105"
+              className={`grid h-12 w-12 place-items-center rounded-full text-primary-foreground shadow-md transition-transform group-hover:scale-105 ${dragOver ? "scale-110" : ""}`}
               style={{ backgroundImage: "var(--gradient-primary)" }}
             >
               <UploadCloud className="h-6 w-6" />
             </div>
-            <div className="text-sm font-medium">Tap to select images</div>
+            <div className="text-sm font-medium">
+              {dragOver ? "Drop images to add" : "Tap to select images"}
+            </div>
+            <div className="hidden text-xs text-muted-foreground sm:block">
+              or drag &amp; drop files here
+            </div>
             <div className="text-xs text-muted-foreground">JPG · JPEG · PNG · WEBP</div>
           </button>
+
           <input
             ref={inputRef}
             type="file"
@@ -633,18 +712,45 @@ export function NoteRenamer() {
               <div className="flex items-center gap-3">
                 <button
                   type="button"
-                  onClick={() => setBatchRatioOpen(true)}
-                  className="inline-flex items-center gap-1 rounded-md border border-border bg-card px-2 py-1 text-xs font-medium text-foreground hover:border-primary hover:text-primary"
-                >
-                  <CropIcon className="h-3.5 w-3.5" />
-                  Crop all
-                </button>
-                <button
-                  type="button"
                   onClick={clearAll}
                   className="text-xs font-medium text-muted-foreground underline-offset-4 hover:text-destructive hover:underline"
                 >
                   Clear all
+                </button>
+              </div>
+            </div>
+          )}
+
+          {items.length > 0 && selected.size > 0 && (
+            <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-primary/40 bg-primary/10 px-3 py-2 text-sm">
+              <span className="font-medium text-foreground">
+                {selected.size} selected
+              </span>
+              <div className="flex items-center gap-2">
+                {selected.size < items.length && (
+                  <button
+                    type="button"
+                    onClick={selectAll}
+                    className="inline-flex items-center gap-1 rounded-md border border-border bg-card px-2 py-1 text-xs font-medium text-foreground hover:border-primary hover:text-primary"
+                  >
+                    Select all
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={clearSelection}
+                  className="rounded-md px-2 py-1 text-xs font-medium text-muted-foreground hover:text-foreground"
+                >
+                  Clear
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setBatchRatioOpen(true)}
+                  className="inline-flex items-center gap-1 rounded-md px-3 py-1.5 text-xs font-semibold text-primary-foreground shadow-md"
+                  style={{ backgroundImage: "var(--gradient-primary)" }}
+                >
+                  <CropIcon className="h-3.5 w-3.5" />
+                  Crop selected
                 </button>
               </div>
             </div>
@@ -691,7 +797,7 @@ export function NoteRenamer() {
 
           {items.length > 0 && (
             <div className="mt-3">
-              <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd}>
+              <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd} modifiers={[restrictToVerticalAxis, restrictToParentElement]}>
                 <SortableContext items={items.map((i) => i.id)} strategy={verticalListSortingStrategy}>
                   <ul className="flex flex-col gap-2">
                     {items.map((it, i) => (
@@ -700,6 +806,9 @@ export function NoteRenamer() {
                         item={it}
                         position={i}
                         newName={previews?.[i] ?? null}
+                        selected={selected.has(it.id)}
+                        onToggleSelect={() => toggleSelect(it.id)}
+                        onRestore={() => restoreOriginal(it.id)}
                         onRemove={() => removeItem(it.id)}
                         onPreview={() => setViewerId(it.id)}
                         onCrop={() => setCropId(it.id)}
@@ -714,7 +823,7 @@ export function NoteRenamer() {
 
         <section className="mb-8">
           <StepHeader n={2} title="Rename settings" subtitle="Live preview updates as you type." />
-          <div className="grid gap-5 rounded-2xl border border-border bg-card p-4 shadow-sm">
+          <div className="grid min-w-0 grid-cols-1 gap-5 rounded-2xl border border-border bg-card p-4 shadow-sm">
             <FloatingField
               id="base"
               label="Base name"
@@ -868,8 +977,9 @@ export function NoteRenamer() {
       {batchRatioOpen && (
         <BatchRatioModal
           busy={batchBusy}
+          count={selected.size}
           onClose={() => !batchBusy && setBatchRatioOpen(false)}
-          onPick={(r) => applyBatchRatio(r)}
+          onPick={(r) => applyBatchRatio(r, selected)}
         />
       )}
 
@@ -982,8 +1092,9 @@ function FloatingField({
         inputMode={inputMode}
         value={value}
         placeholder=" "
+        autoComplete="off"
         onChange={(e) => onChange(e.target.value)}
-        className="peer h-14 w-full rounded-xl border border-border bg-background px-3 pt-5 pb-1 text-sm text-foreground outline-none transition-all placeholder:text-transparent focus:border-primary focus:ring-2 focus:ring-primary/30"
+        className="peer no-spinner h-14 w-full rounded-xl border border-border bg-background px-3 pt-5 pb-1 text-sm text-foreground outline-none transition-all placeholder:text-transparent focus:border-primary focus:ring-2 focus:ring-primary/30 lg:h-16 lg:text-base"
       />
       <label
         htmlFor={id}
@@ -1040,7 +1151,6 @@ function FloatingDisplay({
   );
 }
 
-
 function LanguageToggle({
   lang,
   onChange,
@@ -1055,30 +1165,30 @@ function LanguageToggle({
         className="absolute inset-y-1 left-1 w-[calc(50%-0.25rem)] rounded-lg shadow-md transition-transform duration-300 ease-out"
         style={{
           backgroundImage: "var(--gradient-primary)",
-          transform: lang === "bn" ? "translateX(100%)" : "translateX(0%)",
+          transform: lang === "en" ? "translateX(100%)" : "translateX(0%)",
         }}
       />
-      <button
-        type="button"
-        onClick={() => onChange("en")}
-        aria-pressed={lang === "en"}
-        className={cn(
-          "relative z-10 text-xs font-semibold transition-colors duration-200",
-          lang === "en" ? "text-primary-foreground" : "text-muted-foreground",
-        )}
-      >
-        English · Page-1
-      </button>
       <button
         type="button"
         onClick={() => onChange("bn")}
         aria-pressed={lang === "bn"}
         className={cn(
-          "relative z-10 text-xs font-semibold transition-colors duration-200",
+          "relative z-10 border-0 bg-transparent text-xs font-semibold outline-none transition-colors duration-200 focus:outline-none focus-visible:outline-none focus-visible:ring-0",
           lang === "bn" ? "text-primary-foreground" : "text-muted-foreground",
         )}
       >
         বাংলা · পৃষ্ঠা-১
+      </button>
+      <button
+        type="button"
+        onClick={() => onChange("en")}
+        aria-pressed={lang === "en"}
+        className={cn(
+          "relative z-10 border-0 bg-transparent text-xs font-semibold outline-none transition-colors duration-200 focus:outline-none focus-visible:outline-none focus-visible:ring-0",
+          lang === "en" ? "text-primary-foreground" : "text-muted-foreground",
+        )}
+      >
+        English · Page-1
       </button>
     </div>
   );
@@ -1088,6 +1198,9 @@ function SortableRow({
   item,
   position,
   newName,
+  selected,
+  onToggleSelect,
+  onRestore,
   onRemove,
   onPreview,
   onCrop,
@@ -1095,6 +1208,9 @@ function SortableRow({
   item: ImgItem;
   position: number;
   newName: string | null;
+  selected: boolean;
+  onToggleSelect: () => void;
+  onRestore: () => void;
   onRemove: () => void;
   onPreview: () => void;
   onCrop: () => void;
@@ -1102,9 +1218,14 @@ function SortableRow({
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: item.id,
   });
+  const baseTransform = CSS.Transform.toString(transform);
   const style = {
-    transform: CSS.Transform.toString(transform),
+    transform: isDragging ? `${baseTransform} scale(1.00)` : baseTransform,
     transition,
+    boxShadow: isDragging
+      ? "0 20px 40px -8px rgba(0,0,0,0.28), 0 8px 16px -4px rgba(0,0,0,0.18)"
+      : undefined,
+    zIndex: isDragging ? 50 : undefined,
   };
   const moved = position + 1 !== item.uploadOrder;
   return (
@@ -1112,10 +1233,26 @@ function SortableRow({
       ref={setNodeRef}
       style={style}
       className={cn(
-        "flex items-center gap-3 rounded-xl border border-border bg-card p-2.5 transition-shadow",
-        isDragging && "shadow-2xl ring-2 ring-primary/40",
+        "flex items-center gap-3 rounded-xl border border-border bg-card p-2.5 transition-shadow duration-200 ease-out",
+        isDragging && "ring-2 ring-primary/40",
+        selected && !isDragging && "ring-2 ring-primary/60 border-primary/50",
       )}
     >
+      <button
+        type="button"
+        role="checkbox"
+        aria-checked={selected}
+        aria-label={selected ? "Deselect image" : "Select image"}
+        onClick={onToggleSelect}
+        className={cn(
+          "grid h-6 w-6 shrink-0 place-items-center rounded-md border transition",
+          selected
+            ? "border-primary bg-[image:var(--gradient-primary)] text-primary-foreground shadow"
+            : "border-border bg-background text-transparent hover:border-primary",
+        )}
+      >
+        <Check className="h-3.5 w-3.5" />
+      </button>
       <button
         type="button"
         aria-label="Drag to reorder"
@@ -1167,6 +1304,17 @@ function SortableRow({
           <div className="mt-0.5 truncate font-mono text-[11px] text-primary">→ {newName}</div>
         )}
       </div>
+      {item.cropped && (
+        <button
+          type="button"
+          aria-label="Restore original (undo crop)"
+          title="Restore original"
+          onClick={onRestore}
+          className="grid h-10 w-10 shrink-0 place-items-center rounded-md text-muted-foreground hover:bg-primary/10 hover:text-primary"
+        >
+          <Undo2 className="h-4 w-4" />
+        </button>
+      )}
       <button
         type="button"
         aria-label="Crop image"
@@ -1371,7 +1519,7 @@ function CropModal({
         canRedo ? "text-foreground hover:bg-white/10" : "text-muted-foreground/50",
       )}
     >
-      <RotateCw className="h-5 w-5 scale-x-[-1]" />
+      <Undo2 className="h-5 w-5 scale-x-[-1]" />
     </button>
   </div>
   
@@ -1392,7 +1540,7 @@ function CropModal({
       <div className="relative flex-1 overflow-hidden">
         <div className="absolute inset-4 sm:inset-8">
           <Cropper
-  image={item.url}
+  image={item.originalUrl}
   crop={state.crop}
   zoom={state.zoom}
   rotation={state.rotation} // এটি থাকবে, যাতে আপনার নিচের ৯০° বাটন কাজ করে
@@ -1539,10 +1687,12 @@ function RatioGlyph({ label }: { label: string }) {
 
 function BatchRatioModal({
   busy,
+  count,
   onClose,
   onPick,
 }: {
   busy: boolean;
+  count: number;
   onClose: () => void;
   onPick: (ratio: number) => void;
 }) {
@@ -1550,7 +1700,9 @@ function BatchRatioModal({
     <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 p-0 backdrop-blur-sm sm:items-center sm:p-4">
       <div className="w-full max-w-md rounded-t-2xl border border-border bg-card shadow-2xl sm:rounded-2xl">
         <div className="flex items-center justify-between border-b border-border px-4 py-3">
-          <h3 className="text-sm font-semibold text-foreground">Crop all images</h3>
+          <h3 className="text-sm font-semibold text-foreground">
+            Crop {count} selected image{count === 1 ? "" : "s"}
+          </h3>
           <button
             type="button"
             onClick={onClose}
@@ -1562,7 +1714,7 @@ function BatchRatioModal({
         </div>
         <div className="p-4">
           <p className="mb-3 text-xs text-muted-foreground">
-            Center-crop every uploaded image to the selected aspect ratio.
+            Center-crop the selected image{count === 1 ? "" : "s"} to the chosen aspect ratio. You can restore the original from the row later.
           </p>
           <div className="grid grid-cols-3 gap-2">
             {RATIO_PRESETS.filter((r) => r.value !== null).map((r) => (

@@ -10,19 +10,30 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
-import { Route as ApiDriveUploadRouteImport } from './routes/api/drive/upload'
+import { Route as AboutRouteImport } from './routes/about'
+import { Route as PrivacyRouteImport } from './routes/privacy'
+import { Route as TermsRouteImport } from './routes/terms'
 import { Route as ApiDriveFoldersRouteImport } from './routes/api/drive/folders'
-import { Route as ApiDriveOauthStartRouteImport } from './routes/api/drive/oauth/start'
-import { Route as ApiDriveOauthCallbackRouteImport } from './routes/api/drive/oauth/callback'
+import { Route as ApiDriveUploadRouteImport } from './routes/api/drive/upload'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
-const ApiDriveUploadRoute = ApiDriveUploadRouteImport.update({
-  id: '/api/drive/upload',
-  path: '/api/drive/upload',
+const AboutRoute = AboutRouteImport.update({
+  id: '/about',
+  path: '/about',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const PrivacyRoute = PrivacyRouteImport.update({
+  id: '/privacy',
+  path: '/privacy',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const TermsRoute = TermsRouteImport.update({
+  id: '/terms',
+  path: '/terms',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ApiDriveFoldersRoute = ApiDriveFoldersRouteImport.update({
@@ -30,69 +41,71 @@ const ApiDriveFoldersRoute = ApiDriveFoldersRouteImport.update({
   path: '/api/drive/folders',
   getParentRoute: () => rootRouteImport,
 } as any)
-const ApiDriveOauthStartRoute = ApiDriveOauthStartRouteImport.update({
-  id: '/api/drive/oauth/start',
-  path: '/api/drive/oauth/start',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const ApiDriveOauthCallbackRoute = ApiDriveOauthCallbackRouteImport.update({
-  id: '/api/drive/oauth/callback',
-  path: '/api/drive/oauth/callback',
+const ApiDriveUploadRoute = ApiDriveUploadRouteImport.update({
+  id: '/api/drive/upload',
+  path: '/api/drive/upload',
   getParentRoute: () => rootRouteImport,
 } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/about': typeof AboutRoute
+  '/privacy': typeof PrivacyRoute
+  '/terms': typeof TermsRoute
   '/api/drive/folders': typeof ApiDriveFoldersRoute
   '/api/drive/upload': typeof ApiDriveUploadRoute
-  '/api/drive/oauth/callback': typeof ApiDriveOauthCallbackRoute
-  '/api/drive/oauth/start': typeof ApiDriveOauthStartRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/about': typeof AboutRoute
+  '/privacy': typeof PrivacyRoute
+  '/terms': typeof TermsRoute
   '/api/drive/folders': typeof ApiDriveFoldersRoute
   '/api/drive/upload': typeof ApiDriveUploadRoute
-  '/api/drive/oauth/callback': typeof ApiDriveOauthCallbackRoute
-  '/api/drive/oauth/start': typeof ApiDriveOauthStartRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/about': typeof AboutRoute
+  '/privacy': typeof PrivacyRoute
+  '/terms': typeof TermsRoute
   '/api/drive/folders': typeof ApiDriveFoldersRoute
   '/api/drive/upload': typeof ApiDriveUploadRoute
-  '/api/drive/oauth/callback': typeof ApiDriveOauthCallbackRoute
-  '/api/drive/oauth/start': typeof ApiDriveOauthStartRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
+    | '/about'
+    | '/privacy'
+    | '/terms'
     | '/api/drive/folders'
     | '/api/drive/upload'
-    | '/api/drive/oauth/callback'
-    | '/api/drive/oauth/start'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
+    | '/about'
+    | '/privacy'
+    | '/terms'
     | '/api/drive/folders'
     | '/api/drive/upload'
-    | '/api/drive/oauth/callback'
-    | '/api/drive/oauth/start'
   id:
     | '__root__'
     | '/'
+    | '/about'
+    | '/privacy'
+    | '/terms'
     | '/api/drive/folders'
     | '/api/drive/upload'
-    | '/api/drive/oauth/callback'
-    | '/api/drive/oauth/start'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  AboutRoute: typeof AboutRoute
+  PrivacyRoute: typeof PrivacyRoute
+  TermsRoute: typeof TermsRoute
   ApiDriveFoldersRoute: typeof ApiDriveFoldersRoute
   ApiDriveUploadRoute: typeof ApiDriveUploadRoute
-  ApiDriveOauthCallbackRoute: typeof ApiDriveOauthCallbackRoute
-  ApiDriveOauthStartRoute: typeof ApiDriveOauthStartRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -104,11 +117,25 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/api/drive/upload': {
-      id: '/api/drive/upload'
-      path: '/api/drive/upload'
-      fullPath: '/api/drive/upload'
-      preLoaderRoute: typeof ApiDriveUploadRouteImport
+    '/about': {
+      id: '/about'
+      path: '/about'
+      fullPath: '/about'
+      preLoaderRoute: typeof AboutRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/privacy': {
+      id: '/privacy'
+      path: '/privacy'
+      fullPath: '/privacy'
+      preLoaderRoute: typeof PrivacyRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/terms': {
+      id: '/terms'
+      path: '/terms'
+      fullPath: '/terms'
+      preLoaderRoute: typeof TermsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/api/drive/folders': {
@@ -118,18 +145,11 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiDriveFoldersRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/api/drive/oauth/start': {
-      id: '/api/drive/oauth/start'
-      path: '/api/drive/oauth/start'
-      fullPath: '/api/drive/oauth/start'
-      preLoaderRoute: typeof ApiDriveOauthStartRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/api/drive/oauth/callback': {
-      id: '/api/drive/oauth/callback'
-      path: '/api/drive/oauth/callback'
-      fullPath: '/api/drive/oauth/callback'
-      preLoaderRoute: typeof ApiDriveOauthCallbackRouteImport
+    '/api/drive/upload': {
+      id: '/api/drive/upload'
+      path: '/api/drive/upload'
+      fullPath: '/api/drive/upload'
+      preLoaderRoute: typeof ApiDriveUploadRouteImport
       parentRoute: typeof rootRouteImport
     }
   }
@@ -137,10 +157,11 @@ declare module '@tanstack/react-router' {
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  AboutRoute: AboutRoute,
+  PrivacyRoute: PrivacyRoute,
+  TermsRoute: TermsRoute,
   ApiDriveFoldersRoute: ApiDriveFoldersRoute,
   ApiDriveUploadRoute: ApiDriveUploadRoute,
-  ApiDriveOauthCallbackRoute: ApiDriveOauthCallbackRoute,
-  ApiDriveOauthStartRoute: ApiDriveOauthStartRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

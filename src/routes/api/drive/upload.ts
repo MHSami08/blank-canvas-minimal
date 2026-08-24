@@ -1,5 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { requireUploader, uploadFileToDrive } from "@/lib/drive.server";
+import { requireUploader } from "@/lib/drive-auth.server";
+import { uploadFile } from "@/lib/google-drive.server";
 
 export const Route = createFileRoute("/api/drive/upload")({
   server: {
@@ -21,7 +22,7 @@ export const Route = createFileRoute("/api/drive/upload")({
           }
           const body = await file.arrayBuffer();
           const mimeType = file.type || "application/octet-stream";
-          const result = await uploadFileToDrive({ folderId, filename, mimeType, body });
+          const result = await uploadFile({ folderId, filename, mimeType, body });
           return Response.json(result);
         } catch (e) {
           const msg = e instanceof Error ? e.message : String(e);
