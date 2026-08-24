@@ -10,7 +10,7 @@ import {
 } from "@tanstack/react-router";
 import { useEffect, type ReactNode } from "react";
 import { ClerkProvider, SignedIn, SignedOut, SignInButton, UserButton } from "@clerk/clerk-react";
-import { Settings as SettingsIcon } from "lucide-react";
+import { Settings as SettingsIcon, Download as DownloadIcon } from "lucide-react";
 
 import appCss from "../styles.css?url";
 import { reportLovableError } from "../lib/lovable-error-reporting";
@@ -163,6 +163,13 @@ function RootComponent() {
       <QueryClientProvider client={queryClient}>
         {showHeaderControls ? (
         <div className="fixed right-3 top-3 z-50 flex items-center" style={{ gap: "5px" }}>
+          <Link
+            to="/download"
+            aria-label="Download Windows app"
+            className="grid h-10 w-10 place-items-center rounded-md text-foreground hover:text-primary"
+          >
+            <DownloadIcon className="h-6 w-6" />
+          </Link>
           <button
             type="button"
             onClick={() => window.dispatchEvent(new CustomEvent("open-app-settings"))}
