@@ -672,7 +672,7 @@ export function NoteRenamer() {
               );
               if (dropped.length) addFiles(dropped);
             }}
-            className={`group flex w-full flex-col items-center justify-center gap-2 rounded-2xl border-2 border-dashed bg-card px-4 py-10 text-center outline-none transition-all focus:outline-none focus-visible:outline-none focus-visible:ring-0 hover:border-primary hover:bg-accent/50 active:scale-[0.99] ${
+            className={`group flex w-full select-none flex-col items-center justify-center gap-2 rounded-2xl border-2 border-dashed bg-card px-4 py-10 text-center outline-none transition-all focus:outline-none focus-visible:outline-none focus-visible:ring-0 hover:border-primary hover:bg-accent/50 active:scale-[0.99] ${
               dragOver ? "border-primary bg-accent/60 ring-2 ring-primary/40" : "border-border"
             }`}
             style={{ WebkitTapHighlightColor: "transparent" }}
