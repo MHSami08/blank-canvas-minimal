@@ -132,6 +132,8 @@ export function DriveUpload({ files }: Props) {
     typeof navigator !== "undefined" ? !navigator.onLine : false,
   );
   const [completed, setCompleted] = useState<Set<string>>(new Set());
+  const [failed, setFailed] = useState<Map<string, string>>(new Map());
+  const [active, setActive] = useState<Set<string>>(new Set());
   const pausedRef = useRef(false);
   const PROGRESS_KEY = "drive-upload-progress-v1";
 
