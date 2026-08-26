@@ -205,3 +205,32 @@ export async function downloadFile(fileId: string): Promise<Response> {
   url.searchParams.set("supportsAllDrives", "true");
   return driveFetch(url.toString());
   }
+
+/**
+ * Short-lived Drive access token handed to the browser so that the image
+ * binary is uploaded directly from the browser to Google (never proxied
+ * through the serverless function, which has a small request body limit).
+ * Scope is drive.file, so the token can only touch files/folders this app
+ * created or was explicitly granted.
+ */
+export async function issueClientAccessToken(): Promise<{ accessToken: string; expiresAt: number }> {
+  const token = await getAccessToken();
+  return { accessToken: token, expiresAt: cached?.expiresAt ?? Math.floor(Date.now() / 1000) + 300 };
+}
+
+/** Verify folderId is the configured root or a descendant of it. */
+export async function assertFolderInRoot(folderId: string): Promise<void> {
+  const rootId = getRootFolderId();
+  if (folderId === rootId) return;
+  let current = folderId;
+  for (let depth = 0; depth < 12; depth++) {
+    const meta = await driveJson<{ parents?: string[] }>(
+      `${DRIVE_API}/files/${encodeURIComponent(current)}?fields=parents&supportsAllDrives=true`,
+    );
+    const parent = meta.parents?.[0];
+    if (!parent) break;
+    if (parent === rootId) return;
+    current = parent;
+  }
+  throw new Error("Folder is outside the allowed root folder");
+}
