@@ -53,7 +53,7 @@ export async function collectDroppedImages(dt: DataTransfer): Promise<File[]> {
         ? ((item as DataTransferItem & { webkitGetAsEntry: () => FsEntry | null }).webkitGetAsEntry())
         : null,
     )
-    .filter((e): e is FsEntry => Boolean(e));
+    .filter(Boolean) as unknown as FsEntry[];
 
   if (entries.length > 0) {
     for (const entry of entries) await walk(entry, out);
