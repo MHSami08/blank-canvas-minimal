@@ -8,6 +8,7 @@
   "author": "Page Renamer Pro",
   "devDependencies": {
     "@electron/packager": "^20.3.0",
-    "electron": "^43.4.1"
+    "electron": "^43.4.1",
+    "electron-builder": "^26.15.3"
   }
 }

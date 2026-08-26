@@ -1,0 +1,17 @@
+appId: com.pagerenamerpro.app
+productName: Page Renamer Pro
+directories:
+  output: release
+files:
+  - main.cjs
+  - offline.html
+  - icon.ico
+  - app/**/*
+  - package.json
+win:
+  icon: icon.ico
+  target:
+    - portable
+portable:
+  artifactName: Page Renamer Pro-Offline.exe
+electronVersion: 43.4.1
