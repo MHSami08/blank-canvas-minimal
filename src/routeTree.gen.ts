@@ -15,6 +15,7 @@ import { Route as DownloadRouteImport } from './routes/download'
 import { Route as PrivacyRouteImport } from './routes/privacy'
 import { Route as TermsRouteImport } from './routes/terms'
 import { Route as ApiDriveFoldersRouteImport } from './routes/api/drive/folders'
+import { Route as ApiDriveTokenRouteImport } from './routes/api/drive/token'
 import { Route as ApiDriveUploadRouteImport } from './routes/api/drive/upload'
 import { Route as ApiDriveOauthCallbackRouteImport } from './routes/api/drive/oauth/callback'
 import { Route as ApiDriveOauthStartRouteImport } from './routes/api/drive/oauth/start'
@@ -49,6 +50,11 @@ const ApiDriveFoldersRoute = ApiDriveFoldersRouteImport.update({
   path: '/api/drive/folders',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiDriveTokenRoute = ApiDriveTokenRouteImport.update({
+  id: '/api/drive/token',
+  path: '/api/drive/token',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiDriveUploadRoute = ApiDriveUploadRouteImport.update({
   id: '/api/drive/upload',
   path: '/api/drive/upload',
@@ -72,6 +78,7 @@ export interface FileRoutesByFullPath {
   '/privacy': typeof PrivacyRoute
   '/terms': typeof TermsRoute
   '/api/drive/folders': typeof ApiDriveFoldersRoute
+  '/api/drive/token': typeof ApiDriveTokenRoute
   '/api/drive/upload': typeof ApiDriveUploadRoute
   '/api/drive/oauth/callback': typeof ApiDriveOauthCallbackRoute
   '/api/drive/oauth/start': typeof ApiDriveOauthStartRoute
@@ -83,6 +90,7 @@ export interface FileRoutesByTo {
   '/privacy': typeof PrivacyRoute
   '/terms': typeof TermsRoute
   '/api/drive/folders': typeof ApiDriveFoldersRoute
+  '/api/drive/token': typeof ApiDriveTokenRoute
   '/api/drive/upload': typeof ApiDriveUploadRoute
   '/api/drive/oauth/callback': typeof ApiDriveOauthCallbackRoute
   '/api/drive/oauth/start': typeof ApiDriveOauthStartRoute
@@ -95,6 +103,7 @@ export interface FileRoutesById {
   '/privacy': typeof PrivacyRoute
   '/terms': typeof TermsRoute
   '/api/drive/folders': typeof ApiDriveFoldersRoute
+  '/api/drive/token': typeof ApiDriveTokenRoute
   '/api/drive/upload': typeof ApiDriveUploadRoute
   '/api/drive/oauth/callback': typeof ApiDriveOauthCallbackRoute
   '/api/drive/oauth/start': typeof ApiDriveOauthStartRoute
@@ -108,6 +117,7 @@ export interface FileRouteTypes {
     | '/privacy'
     | '/terms'
     | '/api/drive/folders'
+    | '/api/drive/token'
     | '/api/drive/upload'
     | '/api/drive/oauth/callback'
     | '/api/drive/oauth/start'
@@ -119,6 +129,7 @@ export interface FileRouteTypes {
     | '/privacy'
     | '/terms'
     | '/api/drive/folders'
+    | '/api/drive/token'
     | '/api/drive/upload'
     | '/api/drive/oauth/callback'
     | '/api/drive/oauth/start'
@@ -130,6 +141,7 @@ export interface FileRouteTypes {
     | '/privacy'
     | '/terms'
     | '/api/drive/folders'
+    | '/api/drive/token'
     | '/api/drive/upload'
     | '/api/drive/oauth/callback'
     | '/api/drive/oauth/start'
@@ -142,6 +154,7 @@ export interface RootRouteChildren {
   PrivacyRoute: typeof PrivacyRoute
   TermsRoute: typeof TermsRoute
   ApiDriveFoldersRoute: typeof ApiDriveFoldersRoute
+  ApiDriveTokenRoute: typeof ApiDriveTokenRoute
   ApiDriveUploadRoute: typeof ApiDriveUploadRoute
   ApiDriveOauthCallbackRoute: typeof ApiDriveOauthCallbackRoute
   ApiDriveOauthStartRoute: typeof ApiDriveOauthStartRoute
@@ -191,6 +204,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiDriveFoldersRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/drive/token': {
+      id: '/api/drive/token'
+      path: '/api/drive/token'
+      fullPath: '/api/drive/token'
+      preLoaderRoute: typeof ApiDriveTokenRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/drive/upload': {
       id: '/api/drive/upload'
       path: '/api/drive/upload'
@@ -222,6 +242,7 @@ const rootRouteChildren: RootRouteChildren = {
   PrivacyRoute: PrivacyRoute,
   TermsRoute: TermsRoute,
   ApiDriveFoldersRoute: ApiDriveFoldersRoute,
+  ApiDriveTokenRoute: ApiDriveTokenRoute,
   ApiDriveUploadRoute: ApiDriveUploadRoute,
   ApiDriveOauthCallbackRoute: ApiDriveOauthCallbackRoute,
   ApiDriveOauthStartRoute: ApiDriveOauthStartRoute,
