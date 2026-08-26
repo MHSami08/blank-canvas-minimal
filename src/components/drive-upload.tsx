@@ -379,7 +379,6 @@ export function DriveUpload({ files }: Props) {
         } finally {
           activeNames.delete(name);
           syncActive();
-          done.count = localCompleted.size + localFailed.size + initialCompleted.size - initialCompleted.size;
           setProgress({
             done: localCompleted.size + localFailed.size,
             total: files.length,
