@@ -296,8 +296,9 @@ export function DriveUpload({ files }: Props) {
     };
 
     try {
+      const concurrency = Math.min(8, Math.max(1, pending.length));
       await Promise.all(
-        Array.from({ length: Math.min(3, pending.length) }, () => worker()),
+        Array.from({ length: concurrency }, () => worker()),
       );
       if (failure) throw failure;
       if (!pausedRef.current) {

@@ -3,6 +3,8 @@ import JSZip from "jszip";
 import Cropper, { type Area } from "react-easy-crop";
 import { Footer } from "@/components/footer";
 import { DriveUpload } from "@/components/drive-upload";
+import { toast } from "sonner";
+import { collectDroppedImages } from "@/lib/collect-dropped-images";
 
 import {
   DndContext,
@@ -355,6 +357,7 @@ export function NoteRenamer() {
   }, [items.length, baseName, validStart]);
 
   const [dragOver, setDragOver] = useState(false);
+  const [importing, setImporting] = useState<{ phase: "scan" | "add"; done: number; total: number } | null>(null);
 
 
   const previews = useMemo(() => {
@@ -362,12 +365,13 @@ export function NoteRenamer() {
     return items.map((it, i) => buildFileName(baseName, startNum + i, it.ext, lang));
   }, [items, baseName, validStart, startNum, lang]);
 
-  async function addFiles(fileList: FileList | File[]) {
+  async function addFiles(fileList: FileList | File[], onProgress?: (done: number, total: number) => void) {
     const incoming = Array.from(fileList).filter(
       (f) => ACCEPTED.includes(f.type) || ACCEPTED_EXT.test(f.name),
     );
     if (incoming.length === 0) return;
     setRenamed(false);
+    setError(null);
 
     // If a delete is pending undo, finalize it first so uploadOrder stays gap-free.
     let baseItems = items;
@@ -383,15 +387,55 @@ export function NoteRenamer() {
     const seenInBatch = new Set<string>();
     const mapped: ImgItem[] = [];
     const skipped: string[] = [];
+    const failed: string[] = [];
 
+    // Hash files in parallel (a small pool) instead of one-by-one —
+    // with large batches this cuts the "Adding images…" phase from
+    // O(n) sequential reads to ~8 concurrent ones.
+    type Result =
+      | { kind: "ok"; index: number; sig: string }
+      | { kind: "skipped"; name: string }
+      | { kind: "failed"; name: string };
+    const results: Result[] = new Array(incoming.length);
+    let done = 0;
+    let cursor = 0;
+    const CONCURRENCY = 8;
+    async function worker() {
+      while (cursor < incoming.length) {
+        const i = cursor++;
+        const f = incoming[i];
+        try {
+          const sig = await fileSignature(f);
+          if (existingSigs.has(sig) || seenInBatch.has(sig)) {
+            results[i] = { kind: "skipped", name: f.name };
+          } else {
+            seenInBatch.add(sig);
+            results[i] = { kind: "ok", index: i, sig };
+          }
+        } catch (err) {
+          console.error("addFiles: failed to process file", f.name, err);
+          results[i] = { kind: "failed", name: f.name };
+        }
+        done++;
+        onProgress?.(done, incoming.length);
+      }
+    }
+    await Promise.all(
+      Array.from({ length: Math.min(CONCURRENCY, incoming.length) }, () => worker()),
+    );
+
+    // Build items in original order so uploadOrder matches the drop order.
     for (let i = 0; i < incoming.length; i++) {
-      const f = incoming[i];
-      const sig = await fileSignature(f);
-      if (existingSigs.has(sig) || seenInBatch.has(sig)) {
-        skipped.push(f.name);
+      const r = results[i];
+      if (!r || r.kind === "skipped") {
+        if (r) skipped.push(r.name);
         continue;
       }
-      seenInBatch.add(sig);
+      if (r.kind === "failed") {
+        failed.push(r.name);
+        continue;
+      }
+      const f = incoming[i];
       const url = URL.createObjectURL(f);
       mapped.push({
         id: `${Date.now()}-${i}-${f.name}`,
@@ -401,13 +445,13 @@ export function NoteRenamer() {
         originalUrl: url,
         originalName: f.name,
         ext: getExt(f.name),
-        sig,
+        sig: r.sig,
         uploadOrder: baseItems.length + mapped.length + 1,
       });
     }
 
     if (mapped.length > 0) {
-      const next = pending ? [...baseItems, ...mapped] : [...baseItems, ...mapped];
+      const next = [...baseItems, ...mapped];
       orderCounterRef.current = next.length;
       setItems(next);
     } else if (pending) {
@@ -418,6 +462,11 @@ export function NoteRenamer() {
       setDupInfo({ count: skipped.length, names: skipped });
       if (dupTimerRef.current) clearTimeout(dupTimerRef.current);
       dupTimerRef.current = setTimeout(() => setDupInfo(null), 6000);
+    }
+    if (failed.length > 0) {
+      setError(
+        `Couldn't add ${failed.length} file${failed.length === 1 ? "" : "s"}: ${failed.join(", ")}. Check the app's DevTools console for details.`,
+      );
     }
   }
 
@@ -667,29 +716,71 @@ export function NoteRenamer() {
             onDrop={(e) => {
               e.preventDefault();
               setDragOver(false);
-              const dropped = Array.from(e.dataTransfer?.files ?? []).filter((f) =>
-                /^image\/(jpeg|png|webp)$/.test(f.type) || /\.(jpe?g|png|webp)$/i.test(f.name),
-              );
-              if (dropped.length) addFiles(dropped);
+              const dt = e.dataTransfer;
+              setImporting({ phase: "scan", done: 0, total: 0 });
+              void collectDroppedImages(dt)
+                .then(async (files) => {
+                  if (!files.length) {
+                    setImporting(null);
+                    toast.error("No Picture Found");
+                    return;
+                  }
+                  setImporting({ phase: "add", done: 0, total: files.length });
+                  await addFiles(files, (done, total) =>
+                    setImporting({ phase: "add", done, total }),
+                  );
+                  setImporting(null);
+                })
+                .catch(() => setImporting(null));
             }}
-            className={`group flex w-full select-none flex-col items-center justify-center gap-2 rounded-2xl border-2 border-dashed bg-card px-4 py-10 text-center outline-none transition-all focus:outline-none focus-visible:outline-none focus-visible:ring-0 hover:border-primary hover:bg-accent/50 active:scale-[0.99] ${
-              dragOver ? "border-primary bg-accent/60 ring-2 ring-primary/40" : "border-border"
+
+            className={`group flex w-full select-none flex-col items-center justify-center gap-2 rounded-2xl border-2 border-dashed bg-card px-4 py-10 text-center outline-none transition-all duration-200 focus:outline-none focus-visible:outline-none focus-visible:ring-0 hover:border-primary hover:bg-accent/50 active:scale-[0.99] ${
+              dragOver
+                ? "border-solid border-primary bg-accent/70 ring-4 ring-primary/30 scale-[1.01] shadow-lg"
+                : "border-border"
             }`}
             style={{ WebkitTapHighlightColor: "transparent" }}
           >
             <div
-              className={`grid h-12 w-12 place-items-center rounded-full text-primary-foreground shadow-md transition-transform group-hover:scale-105 ${dragOver ? "scale-110" : ""}`}
+              className={`grid h-12 w-12 place-items-center rounded-full text-primary-foreground shadow-md transition-transform group-hover:scale-105 ${dragOver ? "scale-125 animate-bounce" : ""}`}
               style={{ backgroundImage: "var(--gradient-primary)" }}
             >
               <UploadCloud className="h-6 w-6" />
             </div>
-            <div className="text-sm font-medium">
-              {dragOver ? "Drop images to add" : "Tap to select images"}
-            </div>
-            <div className="hidden text-xs text-muted-foreground sm:block">
-              or drag &amp; drop files here
-            </div>
-            <div className="text-xs text-muted-foreground">JPG · JPEG · PNG · WEBP</div>
+            {importing ? (
+              <div className="flex w-full max-w-xs flex-col items-center gap-2">
+                <div className="text-sm font-medium">
+                  {importing.phase === "scan"
+                    ? "Scanning dropped items…"
+                    : `Adding images… ${importing.done}/${importing.total}`}
+                </div>
+                <div className="h-2 w-full overflow-hidden rounded-full bg-muted">
+                  <div
+                    className="h-full rounded-full transition-all duration-150"
+                    style={{
+                      backgroundImage: "var(--gradient-primary)",
+                      width:
+                        importing.phase === "scan" || importing.total === 0
+                          ? "100%"
+                          : `${Math.round((importing.done / importing.total) * 100)}%`,
+                      ...(importing.phase === "scan" ? { animation: "pulse 1s ease-in-out infinite" } : {}),
+                    }}
+                  />
+                </div>
+              </div>
+            ) : (
+              <>
+                <div className="text-sm font-medium">
+                  {dragOver ? "Release to add your images" : "Tap to select images"}
+                </div>
+                <div className="hidden text-xs text-muted-foreground sm:block">
+                  {dragOver
+                    ? "Multiple files and whole folders are supported"
+                    : "or drag & drop images — or a whole folder — here"}
+                </div>
+                <div className="text-xs text-muted-foreground">JPG · JPEG · PNG · WEBP</div>
+              </>
+            )}
           </button>
 
           <input
@@ -698,8 +789,15 @@ export function NoteRenamer() {
             multiple
             accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp"
             className="hidden"
-            onChange={(e) => {
-              if (e.target.files) addFiles(e.target.files);
+            onChange={async (e) => {
+              const files = e.target.files;
+              if (files && files.length > 0) {
+                setImporting({ phase: "add", done: 0, total: files.length });
+                await addFiles(files, (done, total) =>
+                  setImporting({ phase: "add", done, total }),
+                );
+                setImporting(null);
+              }
               e.target.value = "";
             }}
           />
