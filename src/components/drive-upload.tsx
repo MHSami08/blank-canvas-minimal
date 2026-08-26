@@ -589,10 +589,26 @@ export function DriveUpload({ files }: Props) {
                       />
                     </div>
                     <p className="mt-1.5 text-[10px] text-muted-foreground/80">
-                      Processed {progress.done} of {progress.total} files
+                      {completed.size} uploaded · {failed.size} failed · {Math.max(0, progress.total - progress.done - active.size)} queued
                     </p>
+                    {active.size > 0 && (
+                      <ul className="mt-1.5 space-y-0.5 text-[10px] text-muted-foreground/70">
+                        {Array.from(active).slice(0, 8).map((n) => (
+                          <li key={n} className="truncate">Uploading: {n}</li>
+                        ))}
+                      </ul>
+                    )}
+                    {failed.size > 0 && (
+                      <ul className="mt-1.5 space-y-0.5 text-[10px] text-destructive">
+                        {Array.from(failed.keys()).slice(0, 5).map((n) => (
+                          <li key={n} className="truncate">Failed: {n}</li>
+                        ))}
+                        {failed.size > 5 && <li>+{failed.size - 5} more failed</li>}
+                      </ul>
+                    )}
                   </div>
                 )}
+
 
                 {/* Resume banner when session has unfinished uploads and we're idle */}
                 {!uploading && !paused && completed.size > 0 && completed.size < files.length && (
