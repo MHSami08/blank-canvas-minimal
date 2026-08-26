@@ -225,93 +225,189 @@ export function DriveUpload({ files }: Props) {
     setUploading(true);
     setError(null);
     setUploadDone(null);
+    setFailed(new Map());
+    setActive(new Set());
     pausedRef.current = false;
     setPaused(false);
 
     const done = { count: initialCompleted.size };
     setProgress({ done: done.count, total: files.length });
     let cursor = 0;
-    let failure: Error | null = null;
     const localCompleted = new Set(initialCompleted);
+    const localFailed = new Map<string, string>();
+    const activeNames = new Set<string>();
+    const syncActive = () => setActive(new Set(activeNames));
 
     const isNetworkError = (e: unknown) =>
       e instanceof TypeError || (typeof navigator !== "undefined" && !navigator.onLine);
 
-    const uploadOne = async (file: Blob, name: string, attempt = 0): Promise<void> => {
-      if (pausedRef.current) throw new Error("__paused__");
-      const token = await getToken({ skipCache: attempt > 0 });
-      const form = new FormData();
-      form.set("folderId", folderId);
-      form.set("filename", name);
-      form.set("file", file, name);
-      let res: Response;
-      try {
-        res = await fetch("/api/drive/upload", {
-          method: "POST",
-          headers: { authorization: `Bearer ${token ?? ""}` },
-          body: form,
-        });
-      } catch (e) {
-        if (isNetworkError(e)) {
-          pausedRef.current = true;
-          setPaused(true);
-          setOffline(true);
-          throw new Error("__paused__");
+    // ---- Drive access token manager (server only mints tokens, never proxies bytes) ----
+    let tokenCache: { accessToken: string; expiresAt: number } | null = null;
+    let tokenInFlight: Promise<string> | null = null;
+    const fetchDriveToken = async (force: boolean): Promise<string> => {
+      const now = Math.floor(Date.now() / 1000);
+      if (!force && tokenCache && tokenCache.expiresAt - 90 > now) return tokenCache.accessToken;
+      if (tokenInFlight) return tokenInFlight;
+      tokenInFlight = (async () => {
+        try {
+          const clerkToken = await getToken({ skipCache: force });
+          const res = await fetch("/api/drive/token", {
+            method: "POST",
+            headers: {
+              authorization: `Bearer ${clerkToken ?? ""}`,
+              "content-type": "application/json",
+            },
+            body: JSON.stringify({ folderId }),
+          });
+          if (!res.ok) throw new Error(`Could not get Drive token [${res.status}]: ${await res.text()}`);
+          const json = (await res.json()) as { accessToken: string; expiresAt: number };
+          tokenCache = json;
+          return json.accessToken;
+        } finally {
+          tokenInFlight = null;
         }
-        throw e;
+      })();
+      return tokenInFlight;
+    };
+
+    const UPLOAD_TIMEOUT_MS = 180_000;
+    const MAX_ATTEMPTS = 5;
+
+    /** Direct browser -> Google Drive resumable upload. No binary hits our backend. */
+    const uploadDirect = async (file: Blob, name: string, force: boolean) => {
+      const token = await fetchDriveToken(force);
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), UPLOAD_TIMEOUT_MS);
+      try {
+        const initUrl =
+          "https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable&supportsAllDrives=true&fields=id,name";
+        const initRes = await fetch(initUrl, {
+          method: "POST",
+          headers: {
+            authorization: `Bearer ${token}`,
+            "content-type": "application/json; charset=UTF-8",
+            "X-Upload-Content-Type": file.type || "application/octet-stream",
+          },
+          body: JSON.stringify({
+            name,
+            parents: [folderId],
+            mimeType: file.type || "application/octet-stream",
+          }),
+          signal: controller.signal,
+        });
+        if (!initRes.ok) {
+          const text = await initRes.text();
+          const err = new Error(`Drive init failed for ${name} [${initRes.status}]: ${text.slice(0, 300)}`);
+          (err as { status?: number }).status = initRes.status;
+          throw err;
+        }
+        const location = initRes.headers.get("location");
+        if (!location) throw new Error(`Drive did not return an upload URL for ${name}`);
+        const putRes = await fetch(location, {
+          method: "PUT",
+          headers: { "content-type": file.type || "application/octet-stream" },
+          body: file,
+          signal: controller.signal,
+        });
+        if (!putRes.ok) {
+          const text = await putRes.text();
+          const err = new Error(`Upload failed for ${name} [${putRes.status}]: ${text.slice(0, 300)}`);
+          (err as { status?: number }).status = putRes.status;
+          throw err;
+        }
+      } finally {
+        clearTimeout(timer);
       }
-      if (res.ok) return;
-      const text = await res.text();
-      const retriable =
-        res.status === 401 || res.status === 403 || res.status === 429 || res.status >= 500;
-      if (retriable && attempt < 4) {
-        const delay = 500 * Math.pow(2, attempt) + Math.random() * 250;
-        await new Promise((r) => setTimeout(r, delay));
-        return uploadOne(file, name, attempt + 1);
+    };
+
+    const uploadOne = async (file: Blob, name: string) => {
+      for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
+        if (pausedRef.current) throw new Error("__paused__");
+        try {
+          await uploadDirect(file, name, attempt > 0);
+          return;
+        } catch (e) {
+          if (pausedRef.current) throw new Error("__paused__");
+          if (isNetworkError(e) && typeof navigator !== "undefined" && !navigator.onLine) {
+            pausedRef.current = true;
+            setPaused(true);
+            setOffline(true);
+            throw new Error("__paused__");
+          }
+          const status = (e as { status?: number }).status;
+          const aborted = e instanceof DOMException && e.name === "AbortError";
+          const retriable =
+            aborted ||
+            isNetworkError(e) ||
+            status === undefined ||
+            status === 401 ||
+            status === 403 ||
+            status === 408 ||
+            status === 429 ||
+            status >= 500;
+          if (!retriable || attempt === MAX_ATTEMPTS - 1) {
+            throw e instanceof Error ? e : new Error(String(e));
+          }
+          const delay = 500 * Math.pow(2, attempt) + Math.random() * 250;
+          await new Promise((r) => setTimeout(r, delay));
+        }
       }
-      throw new Error(`Upload failed for ${name} [${res.status}]: ${text}`);
     };
 
     const worker = async () => {
       while (true) {
-        if (failure || pausedRef.current) return;
+        if (pausedRef.current) return;
         const i = cursor++;
         if (i >= pending.length) return;
         const { file, name } = pending[i];
         if (localCompleted.has(name)) continue;
+        activeNames.add(name);
+        syncActive();
         try {
           await uploadOne(file, name);
+          localCompleted.add(name);
+          persistCompleted(folderId, localCompleted);
+          setCompleted(new Set(localCompleted));
         } catch (e) {
           const msg = e instanceof Error ? e.message : String(e);
           if (msg === "__paused__") return;
-          failure = e instanceof Error ? e : new Error(String(e));
-          return;
+          // One bad file must never block the queue.
+          localFailed.set(name, msg);
+          setFailed(new Map(localFailed));
+        } finally {
+          activeNames.delete(name);
+          syncActive();
+          done.count = localCompleted.size + localFailed.size + initialCompleted.size - initialCompleted.size;
+          setProgress({
+            done: localCompleted.size + localFailed.size,
+            total: files.length,
+          });
         }
-        localCompleted.add(name);
-        done.count++;
-        persistCompleted(folderId, localCompleted);
-        setCompleted(new Set(localCompleted));
-        setProgress({ done: done.count, total: files.length });
       }
     };
 
     try {
       const concurrency = Math.min(8, Math.max(1, pending.length));
-      await Promise.all(
-        Array.from({ length: concurrency }, () => worker()),
-      );
-      if (failure) throw failure;
+      await Promise.all(Array.from({ length: concurrency }, () => worker()));
       if (!pausedRef.current) {
-        setUploadDone(`Uploaded ${files.length} file${files.length === 1 ? "" : "s"} to "${data.currentName}".`);
-        persistCompleted(folderId, new Set());
-        setCompleted(new Set());
+        if (localFailed.size > 0) {
+          setError(
+            `${localFailed.size} file${localFailed.size === 1 ? "" : "s"} failed after retries. ${localCompleted.size} of ${files.length} uploaded — press Resume to retry only the failed ones.`,
+          );
+        } else {
+          setUploadDone(`Uploaded ${files.length} file${files.length === 1 ? "" : "s"} to "${data.currentName}".`);
+          persistCompleted(folderId, new Set());
+          setCompleted(new Set());
+        }
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
+      setActive(new Set());
       setUploading(false);
     }
   }
+
 
   async function handleUpload() {
     if (!data || files.length === 0) return;
