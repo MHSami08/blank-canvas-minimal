@@ -784,6 +784,40 @@ export function NoteRenamer() {
             )}
           </button>
 
+          <div className="mt-3 select-none text-center text-xs text-muted-foreground">
+            <button
+              type="button"
+              onClick={() => folderInputRef.current?.click()}
+              className="font-medium underline-offset-4 hover:text-foreground hover:underline"
+            >
+              Or select a whole folder
+            </button>
+          </div>
+
+          <input
+            ref={folderInputRef}
+            type="file"
+            multiple
+            // @ts-expect-error non-standard folder picker attributes
+            webkitdirectory=""
+            directory=""
+            mozdirectory=""
+            className="hidden"
+            onChange={async (e) => {
+              const all = Array.from(e.target.files ?? []).filter((f) =>
+                /\.(jpe?g|png|webp)$/i.test(f.name),
+              );
+              if (all.length > 0) {
+                setImporting({ phase: "add", done: 0, total: all.length });
+                await addFiles(all as unknown as FileList, (done, total) =>
+                  setImporting({ phase: "add", done, total }),
+                );
+                setImporting(null);
+              }
+              e.target.value = "";
+            }}
+          />
+
           <input
             ref={inputRef}
             type="file"
