@@ -243,6 +243,7 @@ export function NoteRenamer() {
   }, []);
   const [sessionReady, setSessionReady] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
+  const folderInputRef = useRef<HTMLInputElement>(null);
   const undoTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const dupTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const orderCounterRef = useRef(0);
@@ -782,6 +783,40 @@ export function NoteRenamer() {
               </>
             )}
           </button>
+
+          <div className="mt-3 select-none text-center text-xs text-muted-foreground">
+            <button
+              type="button"
+              onClick={() => folderInputRef.current?.click()}
+              className="font-medium underline-offset-4 hover:text-foreground hover:underline"
+            >
+              Or select a whole folder
+            </button>
+          </div>
+
+          <input
+            ref={folderInputRef}
+            type="file"
+            multiple
+            // @ts-expect-error non-standard folder picker attributes
+            webkitdirectory=""
+            directory=""
+            mozdirectory=""
+            className="hidden"
+            onChange={async (e) => {
+              const all = Array.from(e.target.files ?? []).filter((f) =>
+                /\.(jpe?g|png|webp)$/i.test(f.name),
+              );
+              if (all.length > 0) {
+                setImporting({ phase: "add", done: 0, total: all.length });
+                await addFiles(all, (done, total) =>
+                  setImporting({ phase: "add", done, total }),
+                );
+                setImporting(null);
+              }
+              e.target.value = "";
+            }}
+          />
 
           <input
             ref={inputRef}
