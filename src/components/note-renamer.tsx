@@ -809,7 +809,7 @@ export function NoteRenamer() {
               );
               if (all.length > 0) {
                 setImporting({ phase: "add", done: 0, total: all.length });
-                await addFiles(all as unknown as FileList, (done, total) =>
+                await addFiles(all, (done, total) =>
                   setImporting({ phase: "add", done, total }),
                 );
                 setImporting(null);
