@@ -8,7 +8,7 @@ import {
   HeadContent,
   Scripts,
 } from "@tanstack/react-router";
-import { useEffect, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { ClerkProvider, SignedIn, SignedOut, SignInButton, UserButton } from "@clerk/clerk-react";
 import { Settings as SettingsIcon, Download as DownloadIcon } from "lucide-react";
 
@@ -129,6 +129,15 @@ function RootComponent() {
   const pathname = useRouterState({ select: (s) => s.location.pathname });
   const showHeaderControls = pathname === "/";
 
+  const [showDownloadButton, setShowDownloadButton] = useState(false);
+  useEffect(() => {
+    const ua = navigator.userAgent;
+    const isElectron = /Electron/.test(ua);
+    const isMobileOrTablet = /Mobi|Android|iPhone|iPad|iPod|Opera Mini|IEMobile|WPDesktop|Tablet/i.test(ua);
+    setShowDownloadButton(!isElectron && !isMobileOrTablet);
+  }, []);
+
+
   return (
     <ClerkProvider
       publishableKey={publishableKey}
@@ -163,13 +172,16 @@ function RootComponent() {
       <QueryClientProvider client={queryClient}>
         {showHeaderControls ? (
         <div className="fixed right-3 top-3 z-50 flex items-center" style={{ gap: "5px" }}>
-          <Link
-            to="/download"
-            aria-label="Download Windows app"
-            className="grid h-10 w-10 place-items-center rounded-md text-foreground hover:text-primary"
-          >
-            <DownloadIcon className="h-6 w-6" />
-          </Link>
+          {showDownloadButton ? (
+            <Link
+              to="/download"
+              aria-label="Download Windows app"
+              className="hidden md:grid h-10 w-10 place-items-center rounded-md text-foreground hover:text-primary"
+            >
+              <DownloadIcon className="h-6 w-6" />
+            </Link>
+          ) : null}
+
           <button
             type="button"
             onClick={() => window.dispatchEvent(new CustomEvent("open-app-settings"))}

@@ -4,6 +4,11 @@ import { Button } from "@/components/ui/button";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { UploadCloud, FolderOpen, ChevronRight, Loader2, CheckCircle2, AlertCircle, ArrowLeft, Folder, Lock, MessageCircle, Pause, Play, WifiOff, TestTube } from "lucide-react";
 import { cn } from "@/lib/utils";
+import {
+  AdaptiveConcurrencyController,
+  classifyError,
+  type ControllerStats,
+} from "@/lib/adaptive-concurrency";
 
 type FolderType = { id: string; name: string };
 type FolderResponse = {
@@ -134,6 +139,7 @@ export function DriveUpload({ files }: Props) {
   const [completed, setCompleted] = useState<Set<string>>(new Set());
   const [failed, setFailed] = useState<Map<string, string>>(new Map());
   const [active, setActive] = useState<Set<string>>(new Set());
+  const [stats, setStats] = useState<ControllerStats | null>(null);
   const pausedRef = useRef(false);
   const PROGRESS_KEY = "drive-upload-progress-v1";
 
@@ -232,6 +238,9 @@ export function DriveUpload({ files }: Props) {
     pausedRef.current = false;
     setPaused(false);
 
+    const ctrl = new AdaptiveConcurrencyController({ start: 15, max: 60, min: 2 });
+    setStats(ctrl.stats());
+
     const done = { count: initialCompleted.size };
     setProgress({ done: done.count, total: files.length });
     let cursor = 0;
@@ -326,7 +335,10 @@ export function DriveUpload({ files }: Props) {
       for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
         if (pausedRef.current) throw new Error("__paused__");
         try {
+          const started = Date.now();
           await uploadDirect(file, name, attempt > 0);
+          if (attempt > 0) ctrl.retryFinished();
+          ctrl.recordSuccess(Date.now() - started);
           return;
         } catch (e) {
           if (pausedRef.current) throw new Error("__paused__");
@@ -348,48 +360,81 @@ export function DriveUpload({ files }: Props) {
             status === 429 ||
             status >= 500;
           if (!retriable || attempt === MAX_ATTEMPTS - 1) {
+            if (attempt > 0) ctrl.retryFinished();
+            ctrl.recordFailure(classifyError(e));
             throw e instanceof Error ? e : new Error(String(e));
           }
+          ctrl.recordRetry(classifyError(e));
+          setStats(ctrl.stats());
           const delay = 500 * Math.pow(2, attempt) + Math.random() * 250;
           await new Promise((r) => setTimeout(r, delay));
         }
       }
     };
 
-    const worker = async () => {
-      while (true) {
-        if (pausedRef.current) return;
-        const i = cursor++;
-        if (i >= pending.length) return;
-        const { file, name } = pending[i];
-        if (localCompleted.has(name)) continue;
-        activeNames.add(name);
-        syncActive();
-        try {
-          await uploadOne(file, name);
-          localCompleted.add(name);
-          persistCompleted(folderId, localCompleted);
-          setCompleted(new Set(localCompleted));
-        } catch (e) {
-          const msg = e instanceof Error ? e.message : String(e);
-          if (msg === "__paused__") return;
-          // One bad file must never block the queue.
-          localFailed.set(name, msg);
-          setFailed(new Map(localFailed));
-        } finally {
-          activeNames.delete(name);
+    // ---- Adaptive worker pool: slots are always released (try/finally) ----
+    let activeWorkers = 0;
+    const running = new Set<Promise<void>>();
+
+    const spawnWorkers = () => {
+      while (
+        !pausedRef.current &&
+        activeWorkers < ctrl.concurrency &&
+        cursor < pending.length
+      ) {
+        const p = worker().finally(() => running.delete(p));
+        running.add(p);
+      }
+    };
+
+    const worker = async (): Promise<void> => {
+      activeWorkers++;
+      try {
+        while (true) {
+          if (pausedRef.current) return;
+          // Shed this worker if the controller lowered concurrency.
+          if (activeWorkers > ctrl.concurrency) return;
+          const i = cursor++;
+          if (i >= pending.length) return;
+          const { file, name } = pending[i];
+          if (localCompleted.has(name)) continue;
+          activeNames.add(name);
           syncActive();
-          setProgress({
-            done: localCompleted.size + localFailed.size,
-            total: files.length,
-          });
+          try {
+            await uploadOne(file, name);
+            localCompleted.add(name);
+            persistCompleted(folderId, localCompleted);
+            setCompleted(new Set(localCompleted));
+          } catch (e) {
+            const msg = e instanceof Error ? e.message : String(e);
+            if (msg === "__paused__") return;
+            // One bad file must never block the queue.
+            localFailed.set(name, msg);
+            setFailed(new Map(localFailed));
+          } finally {
+            activeNames.delete(name);
+            syncActive();
+            setStats(ctrl.stats());
+            setProgress({
+              done: localCompleted.size + localFailed.size,
+              total: files.length,
+            });
+          }
         }
+      } finally {
+        activeWorkers--;
+        // Controller may have raised concurrency while we worked.
+        spawnWorkers();
       }
     };
 
     try {
-      const concurrency = Math.min(8, Math.max(1, pending.length));
-      await Promise.all(Array.from({ length: concurrency }, () => worker()));
+      setStats(ctrl.stats());
+      spawnWorkers();
+      while (running.size > 0) {
+        await Promise.all(Array.from(running));
+      }
+
       if (!pausedRef.current) {
         if (localFailed.size > 0) {
           setError(
@@ -587,6 +632,18 @@ export function DriveUpload({ files }: Props) {
                         style={{ width: `${(progress.done / progress.total) * 100}%` }}
                       />
                     </div>
+                    {stats && (
+                      <p className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[10px] text-muted-foreground/80">
+                        <span className="font-mono">
+                          Parallel uploads: {stats.concurrency} / {stats.max}
+                        </span>
+                        <span>Active: {active.size}</span>
+                        {stats.retrying > 0 && <span>Retrying: {stats.retrying}</span>}
+                        {stats.optimizing && !paused && (
+                          <span className="text-primary">⚡ Optimizing upload speed</span>
+                        )}
+                      </p>
+                    )}
                     <p className="mt-1.5 text-[10px] text-muted-foreground/80">
                       {completed.size} uploaded · {failed.size} failed · {Math.max(0, progress.total - progress.done - active.size)} queued
                     </p>
