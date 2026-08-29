@@ -243,6 +243,7 @@ export function NoteRenamer() {
   }, []);
   const [sessionReady, setSessionReady] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
+  const folderInputRef = useRef<HTMLInputElement>(null);
   const undoTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const dupTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const orderCounterRef = useRef(0);
