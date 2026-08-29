@@ -243,7 +243,6 @@ export function NoteRenamer() {
   }, []);
   const [sessionReady, setSessionReady] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
-  const folderInputRef = useRef<HTMLInputElement>(null);
   const undoTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const dupTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const orderCounterRef = useRef(0);
@@ -358,7 +357,7 @@ export function NoteRenamer() {
   }, [items.length, baseName, validStart]);
 
   const [dragOver, setDragOver] = useState(false);
-  const [importing, setImporting] = useState<{ phase: "scan" | "add"; done: number; total: number } | null>(null);
+  const [importing, setImporting] = useState<{ phase: "scan" | "add"; done: number; total: number; active?: number } | null>(null);
 
 
   const previews = useMemo(() => {
@@ -366,7 +365,7 @@ export function NoteRenamer() {
     return items.map((it, i) => buildFileName(baseName, startNum + i, it.ext, lang));
   }, [items, baseName, validStart, startNum, lang]);
 
-  async function addFiles(fileList: FileList | File[], onProgress?: (done: number, total: number) => void) {
+  async function addFiles(fileList: FileList | File[], onProgress?: (done: number, total: number, active: number) => void) {
     const incoming = Array.from(fileList).filter(
       (f) => ACCEPTED.includes(f.type) || ACCEPTED_EXT.test(f.name),
     );
@@ -386,25 +385,64 @@ export function NoteRenamer() {
     }
     const existingSigs = new Set(baseItems.map((i) => i.sig));
     const seenInBatch = new Set<string>();
-    const mapped: ImgItem[] = [];
     const skipped: string[] = [];
     const failed: string[] = [];
 
-    // Hash files in parallel (a small pool) instead of one-by-one —
-    // with large batches this cuts the "Adding images…" phase from
-    // O(n) sequential reads to ~8 concurrent ones.
+    // Streaming worker pool: each file is hashed and added to the list as soon
+    // as it is ready (in original order), so nothing waits for a global step.
     type Result =
       | { kind: "ok"; index: number; sig: string }
       | { kind: "skipped"; name: string }
       | { kind: "failed"; name: string };
-    const results: Result[] = new Array(incoming.length);
+    const results: (Result | undefined)[] = new Array(incoming.length);
     let done = 0;
     let cursor = 0;
-    const CONCURRENCY = 8;
+    let active = 0;
+    let flushIdx = 0;
+    let added = 0;
+    let current = baseItems;
+    const idBase = Date.now();
+
+    function flush() {
+      const batch: ImgItem[] = [];
+      while (flushIdx < incoming.length && results[flushIdx]) {
+        const r = results[flushIdx]!;
+        const f = incoming[flushIdx];
+        if (r.kind === "ok") {
+          const url = URL.createObjectURL(f);
+          batch.push({
+            id: `${idBase}-${flushIdx}-${f.name}`,
+            file: f,
+            url,
+            originalFile: f,
+            originalUrl: url,
+            originalName: f.name,
+            ext: getExt(f.name),
+            sig: r.sig,
+            uploadOrder: baseItems.length + added + 1,
+          });
+          added++;
+        } else if (r.kind === "skipped") {
+          skipped.push(r.name);
+        } else {
+          failed.push(r.name);
+        }
+        flushIdx++;
+      }
+      if (batch.length > 0) {
+        current = [...current, ...batch];
+        orderCounterRef.current = current.length;
+        setItems(current);
+      }
+    }
+
+    const CONCURRENCY = 15;
     async function worker() {
       while (cursor < incoming.length) {
         const i = cursor++;
         const f = incoming[i];
+        active++;
+        onProgress?.(done, incoming.length, active);
         try {
           const sig = await fileSignature(f);
           if (existingSigs.has(sig) || seenInBatch.has(sig)) {
@@ -418,44 +456,17 @@ export function NoteRenamer() {
           results[i] = { kind: "failed", name: f.name };
         }
         done++;
-        onProgress?.(done, incoming.length);
+        active--;
+        flush();
+        onProgress?.(done, incoming.length, active);
       }
     }
     await Promise.all(
       Array.from({ length: Math.min(CONCURRENCY, incoming.length) }, () => worker()),
     );
+    flush();
 
-    // Build items in original order so uploadOrder matches the drop order.
-    for (let i = 0; i < incoming.length; i++) {
-      const r = results[i];
-      if (!r || r.kind === "skipped") {
-        if (r) skipped.push(r.name);
-        continue;
-      }
-      if (r.kind === "failed") {
-        failed.push(r.name);
-        continue;
-      }
-      const f = incoming[i];
-      const url = URL.createObjectURL(f);
-      mapped.push({
-        id: `${Date.now()}-${i}-${f.name}`,
-        file: f,
-        url,
-        originalFile: f,
-        originalUrl: url,
-        originalName: f.name,
-        ext: getExt(f.name),
-        sig: r.sig,
-        uploadOrder: baseItems.length + mapped.length + 1,
-      });
-    }
-
-    if (mapped.length > 0) {
-      const next = [...baseItems, ...mapped];
-      orderCounterRef.current = next.length;
-      setItems(next);
-    } else if (pending) {
+    if (added === 0 && pending) {
       orderCounterRef.current = baseItems.length;
       setItems(baseItems);
     }
@@ -727,8 +738,8 @@ export function NoteRenamer() {
                     return;
                   }
                   setImporting({ phase: "add", done: 0, total: files.length });
-                  await addFiles(files, (done, total) =>
-                    setImporting({ phase: "add", done, total }),
+                  await addFiles(files, (done, total, active) =>
+                    setImporting({ phase: "add", done, total, active }),
                   );
                   setImporting(null);
                 })
@@ -753,7 +764,11 @@ export function NoteRenamer() {
                 <div className="text-sm font-medium">
                   {importing.phase === "scan"
                     ? "Scanning dropped items…"
-                    : `Adding images… ${importing.done}/${importing.total}`}
+                    : importing.done === 0
+                      ? importing.active && importing.active > 0
+                        ? `Processing ${importing.active} image${importing.active === 1 ? "" : "s"}…`
+                        : "Preparing images…"
+                      : `Importing ${importing.done} / ${importing.total}`}
                 </div>
                 <div className="h-2 w-full overflow-hidden rounded-full bg-muted">
                   <div
@@ -763,7 +778,7 @@ export function NoteRenamer() {
                       width:
                         importing.phase === "scan" || importing.total === 0
                           ? "100%"
-                          : `${Math.round((importing.done / importing.total) * 100)}%`,
+                          : `${Math.max(6, Math.round((importing.done / importing.total) * 100))}%`,
                       ...(importing.phase === "scan" ? { animation: "pulse 1s ease-in-out infinite" } : {}),
                     }}
                   />
@@ -784,40 +799,6 @@ export function NoteRenamer() {
             )}
           </button>
 
-          <div className="mt-3 select-none text-center text-xs text-muted-foreground">
-            <button
-              type="button"
-              onClick={() => folderInputRef.current?.click()}
-              className="font-medium underline-offset-4 hover:text-foreground hover:underline"
-            >
-              Or select a whole folder
-            </button>
-          </div>
-
-          <input
-            ref={folderInputRef}
-            type="file"
-            multiple
-            // @ts-expect-error non-standard folder picker attributes
-            webkitdirectory=""
-            directory=""
-            mozdirectory=""
-            className="hidden"
-            onChange={async (e) => {
-              const all = Array.from(e.target.files ?? []).filter((f) =>
-                /\.(jpe?g|png|webp)$/i.test(f.name),
-              );
-              if (all.length > 0) {
-                setImporting({ phase: "add", done: 0, total: all.length });
-                await addFiles(all, (done, total) =>
-                  setImporting({ phase: "add", done, total }),
-                );
-                setImporting(null);
-              }
-              e.target.value = "";
-            }}
-          />
-
           <input
             ref={inputRef}
             type="file"
@@ -828,8 +809,8 @@ export function NoteRenamer() {
               const files = e.target.files;
               if (files && files.length > 0) {
                 setImporting({ phase: "add", done: 0, total: files.length });
-                await addFiles(files, (done, total) =>
-                  setImporting({ phase: "add", done, total }),
+                await addFiles(files, (done, total, active) =>
+                  setImporting({ phase: "add", done, total, active }),
                 );
                 setImporting(null);
               }
@@ -1477,22 +1458,106 @@ function PreviewModal({
   onClose: () => void;
   onCrop: () => void;
 }) {
+  const stageRef = useRef<HTMLDivElement | null>(null);
+  const [zoom, setZoom] = useState(1);
+  const [offset, setOffset] = useState({ x: 0, y: 0 });
+  const dragRef = useRef<{ x: number; y: number; ox: number; oy: number } | null>(null);
+  const stateRef = useRef({ zoom, offset });
+  stateRef.current = { zoom, offset };
+
+  // lock background scroll while open
+  useEffect(() => {
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = prev;
+    };
+  }, []);
+
+  useEffect(() => {
+    const el = stageRef.current;
+    if (!el) return;
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      const { zoom: z, offset: off } = stateRef.current;
+      const dy = e.deltaY * (e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? 100 : 1);
+      const next = Math.min(8, Math.max(1, z * Math.exp(-dy * 0.0018)));
+      const rect = el.getBoundingClientRect();
+      const px = e.clientX - rect.left - rect.width / 2;
+      const py = e.clientY - rect.top - rect.height / 2;
+      const k = next / z;
+      const nx = px - (px - off.x) * k;
+      const ny = py - (py - off.y) * k;
+      setZoom(next);
+      setOffset(next === 1 ? { x: 0, y: 0 } : { x: nx, y: ny });
+    };
+    el.addEventListener("wheel", onWheel, { passive: false });
+    return () => el.removeEventListener("wheel", onWheel);
+  }, []);
+
+  const reset = () => {
+    setZoom(1);
+    setOffset({ x: 0, y: 0 });
+  };
+
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/60 p-0 backdrop-blur-sm sm:items-center sm:p-4">
       <div className="flex max-h-[95vh] w-full max-w-2xl flex-col overflow-hidden rounded-t-2xl border border-border bg-card shadow-2xl sm:rounded-2xl">
         <div className="flex items-center justify-between border-b border-border px-4 py-3">
           <h3 className="text-sm font-semibold text-foreground">Image #{item.uploadOrder}</h3>
-          <button
-            type="button"
-            onClick={onClose}
-            aria-label="Close"
-            className="grid h-8 w-8 place-items-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
-          >
-            <X className="h-4 w-4" />
-          </button>
+          <div className="flex items-center gap-2">
+            <span className="rounded-md bg-muted px-2 py-1 text-[11px] font-medium text-muted-foreground">
+              {Math.round(zoom * 100)}%
+            </span>
+            <button
+              type="button"
+              onClick={reset}
+              className="rounded-md border border-border px-2 py-1 text-[11px] font-medium text-muted-foreground hover:border-primary hover:text-primary"
+            >
+              Reset
+            </button>
+            <button
+              type="button"
+              onClick={onClose}
+              aria-label="Close"
+              className="grid h-8 w-8 place-items-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
         </div>
-        <div className="flex flex-1 items-center justify-center overflow-auto bg-muted p-3">
-          <img src={item.url} alt={item.originalName} className="max-h-[70vh] w-auto max-w-full rounded-md object-contain" />
+        <div
+          ref={stageRef}
+          className="relative flex h-[70vh] flex-1 items-center justify-center overflow-hidden bg-muted p-3"
+          style={{ touchAction: "none", cursor: zoom > 1 ? (dragRef.current ? "grabbing" : "grab") : "default" }}
+          onDoubleClick={() => (zoom > 1 ? reset() : setZoom(2))}
+          onPointerDown={(e) => {
+            if (zoom <= 1) return;
+            dragRef.current = { x: e.clientX, y: e.clientY, ox: offset.x, oy: offset.y };
+            (e.target as HTMLElement).setPointerCapture?.(e.pointerId);
+          }}
+          onPointerMove={(e) => {
+            const d = dragRef.current;
+            if (!d) return;
+            setOffset({ x: d.ox + (e.clientX - d.x), y: d.oy + (e.clientY - d.y) });
+          }}
+          onPointerUp={() => {
+            dragRef.current = null;
+          }}
+          onPointerLeave={() => {
+            dragRef.current = null;
+          }}
+        >
+          <img
+            src={item.url}
+            alt={item.originalName}
+            draggable={false}
+            className="max-h-full w-auto max-w-full select-none rounded-md object-contain"
+            style={{
+              transform: `translate(${offset.x}px, ${offset.y}px) scale(${zoom})`,
+              transition: dragRef.current ? "none" : "transform 60ms linear",
+            }}
+          />
         </div>
         <div className="flex flex-col gap-2 border-t border-border p-3 sm:flex-row sm:items-center sm:justify-between">
           <div className="min-w-0 truncate text-xs text-muted-foreground">{item.originalName}</div>
@@ -1519,6 +1584,7 @@ function PreviewModal({
     </div>
   );
 }
+
 
 // -----------------------------------------------------------------------------
 // MIUI Gallery-style crop editor
