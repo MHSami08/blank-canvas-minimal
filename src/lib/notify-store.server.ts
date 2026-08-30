@@ -1,50 +1,58 @@
-// Server-only notification log + de-duplication.
-// The project has no database, so records live in the server runtime memory.
-// De-duplication is keyed by a deterministic batch id (folder + file names),
-// so a browser refresh or retry can never produce a second email.
-
-export type NotificationStatus = "pending" | "sending" | "sent" | "failed";
+// Minimal in-memory notification ledger (no database in this project).
+// Purpose: server-side duplicate protection for one-email-per-batch.
+export type NotificationStatus = "sending" | "sent" | "failed";
 
 export type NotificationRecord = {
-  id: string;
   batchId: string;
   clerkUserId: string;
   userName: string;
   userEmail: string;
   batchName: string;
+  rangeName?: string | null;
+  pageRange?: { start: string; end: string } | null;
   imageCount: number;
-  uploadDate: string;
-  uploadTime: string;
-  notificationStatus: NotificationStatus;
-  notificationSentAt: string | null;
+  status: NotificationStatus;
+  createdAt: number;
+  sentAt?: number;
   error?: string;
-  createdAt: string;
 };
 
-const records = new Map<string, NotificationRecord>(); // batchId -> record
-const MAX = 200;
+const records = new Map<string, NotificationRecord>();
+const TTL_MS = 24 * 60 * 60 * 1000;
 
-export function getRecord(batchId: string) {
+function prune() {
+  const cutoff = Date.now() - TTL_MS;
+  for (const [k, v] of records) if (v.createdAt < cutoff) records.delete(k);
+}
+
+export function getRecord(batchId: string): NotificationRecord | undefined {
+  prune();
   return records.get(batchId);
 }
 
-export function listRecords(): NotificationRecord[] {
-  return Array.from(records.values()).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
-}
-
-export function upsert(rec: NotificationRecord) {
-  records.set(rec.batchId, rec);
-  if (records.size > MAX) {
-    const oldest = listRecords().slice(MAX);
-    for (const r of oldest) records.delete(r.batchId);
-  }
+export function beginRecord(r: Omit<NotificationRecord, "status" | "createdAt">): NotificationRecord {
+  const rec: NotificationRecord = { ...r, status: "sending", createdAt: Date.now() };
+  records.set(r.batchId, rec);
   return rec;
 }
 
-export function setStatus(batchId: string, status: NotificationStatus, error?: string) {
-  const rec = records.get(batchId);
-  if (!rec) return;
-  rec.notificationStatus = status;
-  rec.error = error;
-  if (status === "sent") rec.notificationSentAt = new Date().toISOString();
+export function markSent(batchId: string) {
+  const r = records.get(batchId);
+  if (r) {
+    r.status = "sent";
+    r.sentAt = Date.now();
+  }
+}
+
+export function markFailed(batchId: string, error: string) {
+  const r = records.get(batchId);
+  if (r) {
+    r.status = "failed";
+    r.error = error;
+  }
+}
+
+export function listRecords(): NotificationRecord[] {
+  prune();
+  return Array.from(records.values()).sort((a, b) => b.createdAt - a.createdAt);
 }

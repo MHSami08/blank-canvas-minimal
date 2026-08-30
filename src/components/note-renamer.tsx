@@ -44,6 +44,7 @@ import {
   FlipHorizontal2,
   MoreVertical,
   Settings as SettingsIcon,
+  FolderOpen,
 } from "lucide-react";
 import { Check } from "lucide-react";
 
@@ -243,6 +244,7 @@ export function NoteRenamer() {
   }, []);
   const [sessionReady, setSessionReady] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
+  const folderInputRef = useRef<HTMLInputElement>(null);
   const undoTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const dupTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const orderCounterRef = useRef(0);
@@ -364,6 +366,16 @@ export function NoteRenamer() {
     if (!baseName.trim() || !validStart) return null;
     return items.map((it, i) => buildFileName(baseName, startNum + i, it.ext, lang));
   }, [items, baseName, validStart, startNum, lang]);
+
+  async function handleSelectedFiles(fileList: FileList | null) {
+    if (fileList && fileList.length > 0) {
+      setImporting({ phase: "add", done: 0, total: fileList.length });
+      await addFiles(fileList, (done, total, active) =>
+        setImporting({ phase: "add", done, total, active }),
+      );
+      setImporting(null);
+    }
+  }
 
   async function addFiles(fileList: FileList | File[], onProgress?: (done: number, total: number, active: number) => void) {
     const incoming = Array.from(fileList).filter(
@@ -799,6 +811,17 @@ export function NoteRenamer() {
             )}
           </button>
 
+          <div className="mt-2 flex justify-start">
+            <button
+              type="button"
+              onClick={() => folderInputRef.current?.click()}
+              className="inline-flex items-center gap-1.5 rounded-lg px-1 py-1 text-xs font-medium text-muted-foreground transition-colors hover:text-primary"
+            >
+              <FolderOpen className="h-3.5 w-3.5" />
+              Select a whole folder instead
+            </button>
+          </div>
+
           <input
             ref={inputRef}
             type="file"
@@ -806,14 +829,29 @@ export function NoteRenamer() {
             accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp"
             className="hidden"
             onChange={async (e) => {
-              const files = e.target.files;
-              if (files && files.length > 0) {
-                setImporting({ phase: "add", done: 0, total: files.length });
-                await addFiles(files, (done, total, active) =>
-                  setImporting({ phase: "add", done, total, active }),
-                );
-                setImporting(null);
+              await handleSelectedFiles(e.target.files);
+              e.target.value = "";
+            }}
+          />
+
+          {/* webkitdirectory isn't in React's built-in input typings, so it's set
+              imperatively via the ref rather than as a JSX prop. This is what makes
+              clicking this input open the browser's native folder picker instead
+              of the regular multi-file picker. */}
+          <input
+            ref={(node) => {
+              folderInputRef.current = node;
+              if (node) {
+                node.setAttribute("webkitdirectory", "");
+                node.setAttribute("directory", "");
               }
+            }}
+            type="file"
+            multiple
+            accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp"
+            className="hidden"
+            onChange={async (e) => {
+              await handleSelectedFiles(e.target.files);
               e.target.value = "";
             }}
           />
@@ -1052,6 +1090,11 @@ export function NoteRenamer() {
                 file: it.file,
                 name: previews[i],
               }))}
+              rangeName={
+                computedEnd !== null
+                  ? `${baseName.trim()} Page (${startNum}-${computedEnd})`
+                  : null
+              }
             />
           </section>
         )}

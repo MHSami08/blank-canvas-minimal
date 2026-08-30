@@ -12,13 +12,20 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as AboutRouteImport } from './routes/about'
 import { Route as DownloadRouteImport } from './routes/download'
+import { Route as NotificationsRouteImport } from './routes/notifications'
 import { Route as PrivacyRouteImport } from './routes/privacy'
 import { Route as TermsRouteImport } from './routes/terms'
 import { Route as ApiDriveFoldersRouteImport } from './routes/api/drive/folders'
+import { Route as ApiDrivePickerConfigRouteImport } from './routes/api/drive/picker-config'
 import { Route as ApiDriveTokenRouteImport } from './routes/api/drive/token'
 import { Route as ApiDriveUploadRouteImport } from './routes/api/drive/upload'
+import { Route as ApiNotifyHistoryRouteImport } from './routes/api/notify/history'
+import { Route as ApiNotifyTestRouteImport } from './routes/api/notify/test'
+import { Route as ApiNotifyUploadCompleteRouteImport } from './routes/api/notify/upload-complete'
 import { Route as ApiDriveOauthCallbackRouteImport } from './routes/api/drive/oauth/callback'
 import { Route as ApiDriveOauthStartRouteImport } from './routes/api/drive/oauth/start'
+import { Route as ApiGmailOauthCallbackRouteImport } from './routes/api/gmail/oauth/callback'
+import { Route as ApiGmailOauthStartRouteImport } from './routes/api/gmail/oauth/start'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -33,6 +40,11 @@ const AboutRoute = AboutRouteImport.update({
 const DownloadRoute = DownloadRouteImport.update({
   id: '/download',
   path: '/download',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const NotificationsRoute = NotificationsRouteImport.update({
+  id: '/notifications',
+  path: '/notifications',
   getParentRoute: () => rootRouteImport,
 } as any)
 const PrivacyRoute = PrivacyRouteImport.update({
@@ -50,6 +62,11 @@ const ApiDriveFoldersRoute = ApiDriveFoldersRouteImport.update({
   path: '/api/drive/folders',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiDrivePickerConfigRoute = ApiDrivePickerConfigRouteImport.update({
+  id: '/api/drive/picker-config',
+  path: '/api/drive/picker-config',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiDriveTokenRoute = ApiDriveTokenRouteImport.update({
   id: '/api/drive/token',
   path: '/api/drive/token',
@@ -58,6 +75,21 @@ const ApiDriveTokenRoute = ApiDriveTokenRouteImport.update({
 const ApiDriveUploadRoute = ApiDriveUploadRouteImport.update({
   id: '/api/drive/upload',
   path: '/api/drive/upload',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiNotifyHistoryRoute = ApiNotifyHistoryRouteImport.update({
+  id: '/api/notify/history',
+  path: '/api/notify/history',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiNotifyTestRoute = ApiNotifyTestRouteImport.update({
+  id: '/api/notify/test',
+  path: '/api/notify/test',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiNotifyUploadCompleteRoute = ApiNotifyUploadCompleteRouteImport.update({
+  id: '/api/notify/upload-complete',
+  path: '/api/notify/upload-complete',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ApiDriveOauthCallbackRoute = ApiDriveOauthCallbackRouteImport.update({
@@ -70,43 +102,74 @@ const ApiDriveOauthStartRoute = ApiDriveOauthStartRouteImport.update({
   path: '/api/drive/oauth/start',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiGmailOauthCallbackRoute = ApiGmailOauthCallbackRouteImport.update({
+  id: '/api/gmail/oauth/callback',
+  path: '/api/gmail/oauth/callback',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiGmailOauthStartRoute = ApiGmailOauthStartRouteImport.update({
+  id: '/api/gmail/oauth/start',
+  path: '/api/gmail/oauth/start',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/about': typeof AboutRoute
   '/download': typeof DownloadRoute
+  '/notifications': typeof NotificationsRoute
   '/privacy': typeof PrivacyRoute
   '/terms': typeof TermsRoute
   '/api/drive/folders': typeof ApiDriveFoldersRoute
+  '/api/drive/picker-config': typeof ApiDrivePickerConfigRoute
   '/api/drive/token': typeof ApiDriveTokenRoute
   '/api/drive/upload': typeof ApiDriveUploadRoute
+  '/api/notify/history': typeof ApiNotifyHistoryRoute
+  '/api/notify/test': typeof ApiNotifyTestRoute
+  '/api/notify/upload-complete': typeof ApiNotifyUploadCompleteRoute
   '/api/drive/oauth/callback': typeof ApiDriveOauthCallbackRoute
   '/api/drive/oauth/start': typeof ApiDriveOauthStartRoute
+  '/api/gmail/oauth/callback': typeof ApiGmailOauthCallbackRoute
+  '/api/gmail/oauth/start': typeof ApiGmailOauthStartRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/about': typeof AboutRoute
   '/download': typeof DownloadRoute
+  '/notifications': typeof NotificationsRoute
   '/privacy': typeof PrivacyRoute
   '/terms': typeof TermsRoute
   '/api/drive/folders': typeof ApiDriveFoldersRoute
+  '/api/drive/picker-config': typeof ApiDrivePickerConfigRoute
   '/api/drive/token': typeof ApiDriveTokenRoute
   '/api/drive/upload': typeof ApiDriveUploadRoute
+  '/api/notify/history': typeof ApiNotifyHistoryRoute
+  '/api/notify/test': typeof ApiNotifyTestRoute
+  '/api/notify/upload-complete': typeof ApiNotifyUploadCompleteRoute
   '/api/drive/oauth/callback': typeof ApiDriveOauthCallbackRoute
   '/api/drive/oauth/start': typeof ApiDriveOauthStartRoute
+  '/api/gmail/oauth/callback': typeof ApiGmailOauthCallbackRoute
+  '/api/gmail/oauth/start': typeof ApiGmailOauthStartRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/about': typeof AboutRoute
   '/download': typeof DownloadRoute
+  '/notifications': typeof NotificationsRoute
   '/privacy': typeof PrivacyRoute
   '/terms': typeof TermsRoute
   '/api/drive/folders': typeof ApiDriveFoldersRoute
+  '/api/drive/picker-config': typeof ApiDrivePickerConfigRoute
   '/api/drive/token': typeof ApiDriveTokenRoute
   '/api/drive/upload': typeof ApiDriveUploadRoute
+  '/api/notify/history': typeof ApiNotifyHistoryRoute
+  '/api/notify/test': typeof ApiNotifyTestRoute
+  '/api/notify/upload-complete': typeof ApiNotifyUploadCompleteRoute
   '/api/drive/oauth/callback': typeof ApiDriveOauthCallbackRoute
   '/api/drive/oauth/start': typeof ApiDriveOauthStartRoute
+  '/api/gmail/oauth/callback': typeof ApiGmailOauthCallbackRoute
+  '/api/gmail/oauth/start': typeof ApiGmailOauthStartRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -114,50 +177,78 @@ export interface FileRouteTypes {
     | '/'
     | '/about'
     | '/download'
+    | '/notifications'
     | '/privacy'
     | '/terms'
     | '/api/drive/folders'
+    | '/api/drive/picker-config'
     | '/api/drive/token'
     | '/api/drive/upload'
+    | '/api/notify/history'
+    | '/api/notify/test'
+    | '/api/notify/upload-complete'
     | '/api/drive/oauth/callback'
     | '/api/drive/oauth/start'
+    | '/api/gmail/oauth/callback'
+    | '/api/gmail/oauth/start'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
     | '/about'
     | '/download'
+    | '/notifications'
     | '/privacy'
     | '/terms'
     | '/api/drive/folders'
+    | '/api/drive/picker-config'
     | '/api/drive/token'
     | '/api/drive/upload'
+    | '/api/notify/history'
+    | '/api/notify/test'
+    | '/api/notify/upload-complete'
     | '/api/drive/oauth/callback'
     | '/api/drive/oauth/start'
+    | '/api/gmail/oauth/callback'
+    | '/api/gmail/oauth/start'
   id:
     | '__root__'
     | '/'
     | '/about'
     | '/download'
+    | '/notifications'
     | '/privacy'
     | '/terms'
     | '/api/drive/folders'
+    | '/api/drive/picker-config'
     | '/api/drive/token'
     | '/api/drive/upload'
+    | '/api/notify/history'
+    | '/api/notify/test'
+    | '/api/notify/upload-complete'
     | '/api/drive/oauth/callback'
     | '/api/drive/oauth/start'
+    | '/api/gmail/oauth/callback'
+    | '/api/gmail/oauth/start'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AboutRoute: typeof AboutRoute
   DownloadRoute: typeof DownloadRoute
+  NotificationsRoute: typeof NotificationsRoute
   PrivacyRoute: typeof PrivacyRoute
   TermsRoute: typeof TermsRoute
   ApiDriveFoldersRoute: typeof ApiDriveFoldersRoute
+  ApiDrivePickerConfigRoute: typeof ApiDrivePickerConfigRoute
   ApiDriveTokenRoute: typeof ApiDriveTokenRoute
   ApiDriveUploadRoute: typeof ApiDriveUploadRoute
+  ApiNotifyHistoryRoute: typeof ApiNotifyHistoryRoute
+  ApiNotifyTestRoute: typeof ApiNotifyTestRoute
+  ApiNotifyUploadCompleteRoute: typeof ApiNotifyUploadCompleteRoute
   ApiDriveOauthCallbackRoute: typeof ApiDriveOauthCallbackRoute
   ApiDriveOauthStartRoute: typeof ApiDriveOauthStartRoute
+  ApiGmailOauthCallbackRoute: typeof ApiGmailOauthCallbackRoute
+  ApiGmailOauthStartRoute: typeof ApiGmailOauthStartRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -183,6 +274,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof DownloadRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/notifications': {
+      id: '/notifications'
+      path: '/notifications'
+      fullPath: '/notifications'
+      preLoaderRoute: typeof NotificationsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/privacy': {
       id: '/privacy'
       path: '/privacy'
@@ -204,6 +302,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiDriveFoldersRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/drive/picker-config': {
+      id: '/api/drive/picker-config'
+      path: '/api/drive/picker-config'
+      fullPath: '/api/drive/picker-config'
+      preLoaderRoute: typeof ApiDrivePickerConfigRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/drive/token': {
       id: '/api/drive/token'
       path: '/api/drive/token'
@@ -216,6 +321,27 @@ declare module '@tanstack/react-router' {
       path: '/api/drive/upload'
       fullPath: '/api/drive/upload'
       preLoaderRoute: typeof ApiDriveUploadRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/notify/history': {
+      id: '/api/notify/history'
+      path: '/api/notify/history'
+      fullPath: '/api/notify/history'
+      preLoaderRoute: typeof ApiNotifyHistoryRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/notify/test': {
+      id: '/api/notify/test'
+      path: '/api/notify/test'
+      fullPath: '/api/notify/test'
+      preLoaderRoute: typeof ApiNotifyTestRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/notify/upload-complete': {
+      id: '/api/notify/upload-complete'
+      path: '/api/notify/upload-complete'
+      fullPath: '/api/notify/upload-complete'
+      preLoaderRoute: typeof ApiNotifyUploadCompleteRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/api/drive/oauth/callback': {
@@ -232,6 +358,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiDriveOauthStartRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/gmail/oauth/callback': {
+      id: '/api/gmail/oauth/callback'
+      path: '/api/gmail/oauth/callback'
+      fullPath: '/api/gmail/oauth/callback'
+      preLoaderRoute: typeof ApiGmailOauthCallbackRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/gmail/oauth/start': {
+      id: '/api/gmail/oauth/start'
+      path: '/api/gmail/oauth/start'
+      fullPath: '/api/gmail/oauth/start'
+      preLoaderRoute: typeof ApiGmailOauthStartRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
@@ -239,13 +379,20 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AboutRoute: AboutRoute,
   DownloadRoute: DownloadRoute,
+  NotificationsRoute: NotificationsRoute,
   PrivacyRoute: PrivacyRoute,
   TermsRoute: TermsRoute,
   ApiDriveFoldersRoute: ApiDriveFoldersRoute,
+  ApiDrivePickerConfigRoute: ApiDrivePickerConfigRoute,
   ApiDriveTokenRoute: ApiDriveTokenRoute,
   ApiDriveUploadRoute: ApiDriveUploadRoute,
+  ApiNotifyHistoryRoute: ApiNotifyHistoryRoute,
+  ApiNotifyTestRoute: ApiNotifyTestRoute,
+  ApiNotifyUploadCompleteRoute: ApiNotifyUploadCompleteRoute,
   ApiDriveOauthCallbackRoute: ApiDriveOauthCallbackRoute,
   ApiDriveOauthStartRoute: ApiDriveOauthStartRoute,
+  ApiGmailOauthCallbackRoute: ApiGmailOauthCallbackRoute,
+  ApiGmailOauthStartRoute: ApiGmailOauthStartRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

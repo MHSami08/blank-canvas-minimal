@@ -14,21 +14,36 @@ function getClerk(): ClerkClient {
   return clerkClient;
 }
 
-export type VerifiedUser = { userId: string; role: string | null };
+export type VerifiedUser = { userId: string; role: string | null; roles: string[]; isAdmin: boolean };
 
-async function assertRole(userId: string): Promise<string | null> {
+function isAdminUser(userId: string, roles: string[]): boolean {
+  const adminIds = (process.env.ADMIN_CLERK_USER_IDS ?? "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+  return roles.includes("admin") || adminIds.includes(userId);
+}
+
+async function assertRole(userId: string): Promise<VerifiedUser> {
   const user = await getClerk().users.getUser(userId);
   const meta = (user.publicMetadata ?? {}) as { role?: unknown };
-  const role = typeof meta.role === "string" ? meta.role : null;
-  if (role !== REQUIRED_ROLE) {
-    throw new Response(`Forbidden: role "${REQUIRED_ROLE}" required`, { status: 403 });
+  // role may be a string ("admin") or an array (["mustakim-s-student","admin"])
+  const roles: string[] = Array.isArray(meta.role)
+    ? meta.role.filter((r): r is string => typeof r === "string")
+    : typeof meta.role === "string"
+      ? [meta.role]
+      : [];
+  const role = roles[0] ?? null;
+  const admin = isAdminUser(userId, roles);
+  if (!roles.includes(REQUIRED_ROLE) && !admin) {
+    throw new Response(`Forbidden: role "${REQUIRED_ROLE}" or admin required`, { status: 403 });
   }
-  return role;
+  return { userId, role, roles, isAdmin: admin };
 }
 
 /**
  * Verify Clerk session token from Authorization: Bearer <token> header
- * and require the uploader role.
+ * and require the uploader role (or admin).
  */
 export async function requireUploader(request: Request): Promise<VerifiedUser> {
   const auth = request.headers.get("authorization") ?? "";
@@ -45,6 +60,5 @@ export async function requireUploader(request: Request): Promise<VerifiedUser> {
   }
   const userId = claims.sub;
   if (!userId) throw new Response("Unauthorized", { status: 401 });
-  const role = await assertRole(userId);
-  return { userId, role };
+  return assertRole(userId);
 }
