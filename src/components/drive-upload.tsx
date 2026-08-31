@@ -140,7 +140,7 @@ export function DriveUpload({ files, rangeName }: Props) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
-  const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
+  const [progress, setProgress] = useState<{ done: number; total: number; bytesDone: number; bytesTotal: number } | null>(null);
   const [uploadDone, setUploadDone] = useState<string | null>(null);
   const [paused, setPaused] = useState(false);
   const [offline, setOffline] = useState<boolean>(
@@ -194,6 +194,13 @@ export function DriveUpload({ files, rangeName }: Props) {
     if (!data || !hasRole) return;
     void fetchDriveToken(data.currentId).catch(() => {});
   }, [data?.currentId, hasRole, fetchDriveToken]);
+
+  // Second warm-up: the moment files are picked, make sure a fresh token is
+  // already in flight so pressing Upload starts transferring instantly.
+  useEffect(() => {
+    if (!data || !hasRole || files.length === 0) return;
+    void fetchDriveToken(data.currentId).catch(() => {});
+  }, [files.length, data?.currentId, hasRole, fetchDriveToken]);
 
 
 
@@ -307,10 +314,25 @@ export function DriveUpload({ files, rangeName }: Props) {
 
 
     const done = { count: initialCompleted.size };
-    setProgress({ done: done.count, total: files.length });
-    let cursor = 0;
-    const localCompleted = new Set(initialCompleted);
+    // Byte-level progress: the bar moves as soon as the first byte leaves the
+    // browser instead of waiting for the first whole file to finish.
+    const totalBytes = files.reduce((sum, f) => sum + f.file.size, 0) || 1;
+    const bytesLoaded = new Map<string, number>();
+    for (const f of files) if (initialCompleted.has(f.name)) bytesLoaded.set(f.name, f.file.size);
+    let localCompleted: Set<string> = new Set(initialCompleted);
     const localFailed = new Map<string, string>();
+    const reportProgress = () => {
+      let loaded = 0;
+      for (const v of bytesLoaded.values()) loaded += v;
+      setProgress({
+        done: localCompleted.size + localFailed.size,
+        total: files.length,
+        bytesDone: Math.min(loaded, totalBytes),
+        bytesTotal: totalBytes,
+      });
+    };
+    reportProgress();
+    let cursor = 0;
     const activeNames = new Set<string>();
     const syncActive = () => setActive(new Set(activeNames));
 
@@ -328,6 +350,39 @@ export function DriveUpload({ files, rangeName }: Props) {
       return err;
     };
 
+    /**
+     * XHR-based upload with real byte-progress events (fetch cannot report
+     * upload progress in most browsers). Reports loaded bytes per file so the
+     * progress bar starts moving instantly instead of sitting at 0%.
+     */
+    const xhrSend = (
+      method: string,
+      url: string,
+      headers: Record<string, string>,
+      body: Blob | string,
+      signal: AbortSignal,
+      onProgress?: (loaded: number) => void,
+    ): Promise<{ status: number; text: string }> =>
+      new Promise((resolve, reject) => {
+        const xhr = new XMLHttpRequest();
+        xhr.open(method, url, true);
+        for (const [k, v] of Object.entries(headers)) xhr.setRequestHeader(k, v);
+        xhr.timeout = UPLOAD_TIMEOUT_MS;
+        if (onProgress) {
+          xhr.upload.onprogress = (e) => onProgress(e.loaded);
+        }
+        xhr.onload = () => resolve({ status: xhr.status, text: xhr.responseText });
+        xhr.onerror = () => reject(new TypeError("Network request failed"));
+        xhr.ontimeout = () => reject(new DOMException("Upload timed out", "AbortError"));
+        xhr.onabort = () => reject(new DOMException("Upload aborted", "AbortError"));
+        if (signal.aborted) {
+          xhr.abort();
+          return;
+        }
+        signal.addEventListener("abort", () => xhr.abort(), { once: true });
+        xhr.send(body);
+      });
+
     /** Single-request upload (metadata + bytes together) — fastest path for images. */
     const uploadMultipart = async (file: Blob, name: string, token: string, signal: AbortSignal) => {
       const mime = file.type || "application/octet-stream";
@@ -338,20 +393,22 @@ export function DriveUpload({ files, rangeName }: Props) {
         file,
         `\r\n--${boundary}--\r\n`,
       ]);
-      const res = await fetch(
+      const res = await xhrSend(
+        "POST",
         "https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&supportsAllDrives=true&fields=id",
         {
-          method: "POST",
-          headers: {
-            authorization: `Bearer ${token}`,
-            "content-type": `multipart/related; boundary=${boundary}`,
-          },
-          body,
-          signal,
+          authorization: `Bearer ${token}`,
+          "content-type": `multipart/related; boundary=${boundary}`,
+        },
+        body,
+        signal,
+        (loaded) => {
+          bytesLoaded.set(name, Math.min(loaded, file.size));
+          reportProgress();
         },
       );
-      if (!res.ok) throw httpError(name, "Upload failed", res.status, await res.text());
-      const json = (await res.json().catch(() => ({}))) as { id?: string };
+      if (res.status < 200 || res.status >= 300) throw httpError(name, "Upload failed", res.status, res.text);
+      const json = (JSON.parse(res.text || "{}") as { id?: string });
       return json.id ?? null;
     };
 
@@ -374,14 +431,19 @@ export function DriveUpload({ files, rangeName }: Props) {
       if (!initRes.ok) throw httpError(name, "Drive init failed", initRes.status, await initRes.text());
       const location = initRes.headers.get("location");
       if (!location) throw new Error(`Drive did not return an upload URL for ${name}`);
-      const putRes = await fetch(location, {
-        method: "PUT",
-        headers: { "content-type": mime },
-        body: file,
+      const putRes = await xhrSend(
+        "PUT",
+        location,
+        { "content-type": mime },
+        file,
         signal,
-      });
-      if (!putRes.ok) throw httpError(name, "Upload failed", putRes.status, await putRes.text());
-      const json = (await putRes.json().catch(() => ({}))) as { id?: string };
+        (loaded) => {
+          bytesLoaded.set(name, Math.min(loaded, file.size));
+          reportProgress();
+        },
+      );
+      if (putRes.status < 200 || putRes.status >= 300) throw httpError(name, "Upload failed", putRes.status, putRes.text);
+      const json = (JSON.parse(putRes.text || "{}") as { id?: string });
       return json.id ?? null;
     };
 
@@ -541,6 +603,8 @@ export function DriveUpload({ files, rangeName }: Props) {
           const newId = await uploadDirect(file, name, attempt > 0);
           if (attempt > 0) ctrl.retryFinished();
           ctrl.recordSuccess(Date.now() - started);
+          bytesLoaded.set(name, file.size);
+          reportProgress();
           scheduleDuplicateCleanup(name, newId ?? null);
           return;
 
@@ -619,10 +683,7 @@ export function DriveUpload({ files, rangeName }: Props) {
             activeNames.delete(name);
             syncActive();
             setStats(ctrl.stats());
-            setProgress({
-              done: localCompleted.size + localFailed.size,
-              total: files.length,
-            });
+            reportProgress();
           }
         }
       } finally {
@@ -846,7 +907,9 @@ export function DriveUpload({ files, rangeName }: Props) {
                           <>Uploading package...</>
                         )}
                       </span>
-                      <span className="font-mono text-foreground">{Math.round((progress.done / progress.total) * 100)}%</span>
+                      <span className="font-mono text-foreground">
+                        {Math.min(100, Math.floor((progress.bytesDone / progress.bytesTotal) * 100))}%
+                      </span>
                     </div>
                     <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted">
                       <div
@@ -854,7 +917,7 @@ export function DriveUpload({ files, rangeName }: Props) {
                           "h-full transition-all duration-300",
                           paused ? "bg-amber-500" : "bg-primary"
                         )}
-                        style={{ width: `${(progress.done / progress.total) * 100}%` }}
+                        style={{ width: `${Math.min(100, (progress.bytesDone / progress.bytesTotal) * 100)}%` }}
                       />
                     </div>
                     {stats && (
