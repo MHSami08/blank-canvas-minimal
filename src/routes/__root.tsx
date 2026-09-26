@@ -9,6 +9,7 @@ import {
   Scripts,
 } from "@tanstack/react-router";
 import { useEffect, useState, type ReactNode } from "react";
+import { Toaster } from "@/components/ui/sonner";
 import { ClerkProvider, SignedIn, SignedOut, SignInButton, UserButton } from "@clerk/clerk-react";
 import { Settings as SettingsIcon, Download as DownloadIcon } from "lucide-react";
 
@@ -205,6 +206,7 @@ function RootComponent() {
 
         {/* Required: nested routes render here. Removing <Outlet /> breaks all child routes. */}
         <Outlet />
+        <Toaster richColors closeButton position="top-center" />
       </QueryClientProvider>
     </ClerkProvider>
   );

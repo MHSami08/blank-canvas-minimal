@@ -1,15 +1,50 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useAuth, useUser, SignInButton, SignedIn, SignedOut } from "@clerk/clerk-react";
 import { Button } from "@/components/ui/button";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { UploadCloud, FolderOpen, ChevronRight, Loader2, CheckCircle2, AlertCircle, ArrowLeft, Folder, Lock, MessageCircle, Pause, Play, WifiOff, TestTube } from "lucide-react";
+import {
+  AlertDialog,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { UploadCloud, FolderOpen, ChevronRight, Loader2, CheckCircle2, AlertCircle, ArrowLeft, Folder, Lock, MessageCircle, Pause, Play, WifiOff, TestTube, Layers } from "lucide-react";
+import { toast } from "sonner";
 import { cn } from "@/lib/utils";
+import { UploadQueuePanel } from "@/components/upload-queue-panel";
+import {
+  addGroup,
+  getQueue,
+  groupUploadNames,
+  isAlreadyQueued,
+  setSessionMode,
+  useUploadSession,
+} from "@/lib/upload-queue";
+
 import {
   AdaptiveConcurrencyController,
   classifyError,
   type ControllerStats,
 } from "@/lib/adaptive-concurrency";
 import { computeBatchId, computePageRange, notifyBatchComplete } from "@/lib/notify-client";
+import {
+  analyzeLocalFiles,
+  classify,
+  extractPageNumber,
+  fileIsInFolder,
+  filenameStem,
+  formatPages,
+  getPageLabelLang,
+  listFolderFiles,
+  renameWithPage,
+  resolveStartingPage,
+  saveBatchRecord,
+  type LeftoverCandidate,
+  type ScanResult,
+} from "@/lib/upload-scan";
 
 
 type FolderType = { id: string; name: string };
@@ -24,6 +59,9 @@ type Props = {
   files: { file: Blob; name: string }[];
   /** ZIP-style batch name, e.g. "Physics 2nd Page (6-11)". */
   rangeName?: string | null;
+  onQueued?: () => void;
+  /** Set when the user left Starting page empty: pages resolve from the destination folder. */
+  autoPage?: { baseName: string } | null;
 };
 
 function RequestAccessNote({ user }: { user: ReturnType<typeof useUser>["user"] }) {
@@ -122,7 +160,7 @@ function FuelEmptyNote({ user }: { user: ReturnType<typeof useUser>["user"] }) {
     </div>
   );
 }
-export function DriveUpload({ files, rangeName }: Props) {
+export function DriveUpload({ files: inputFiles, rangeName: rangeNameProp, onQueued, autoPage }: Props) {
   const { isSignedIn, user, isLoaded } = useUser();
   const { getToken } = useAuth();
 
@@ -152,6 +190,63 @@ export function DriveUpload({ files, rangeName }: Props) {
   const [stats, setStats] = useState<ControllerStats | null>(null);
   const pausedRef = useRef(false);
   const PROGRESS_KEY = "drive-upload-progress-v1";
+
+  // ---- Smart pre-upload scan ----
+  const [scanning, setScanning] = useState(false);
+  const [scan, setScan] = useState<ScanResult | null>(null);
+  const scanRef = useRef<ScanResult | null>(null);
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  scanRef.current = scan;
+
+  // ---- Global auto-paging (direct + queue share this) ----
+  // autoStart = detected from the destination folder; pageOverride = what the
+  // user typed. The user's value always wins; auto is only the default.
+  const [autoStart, setAutoStart] = useState<number | null>(null);
+  const [detecting, setDetecting] = useState(false);
+  const [pageOverride, setPageOverride] = useState("");
+  const overrideNum = Number(pageOverride);
+  const overrideValid = pageOverride.trim() !== "" && Number.isInteger(overrideNum) && overrideNum >= 0;
+  const effectiveStart = autoPage ? (overrideValid ? overrideNum : autoStart) : null;
+  const pagesReady = !autoPage || effectiveStart != null;
+  const files = useMemo(() => {
+    if (!autoPage || effectiveStart == null) return inputFiles;
+    return inputFiles.map((f, i) => ({ file: f.file, name: renameWithPage(f.name, effectiveStart + i) }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [inputFiles, autoPage?.baseName, effectiveStart, getPageLabelLang()]);
+  const rangeName =
+    autoPage && effectiveStart != null && inputFiles.length > 0
+      ? `${autoPage.baseName} Page (${effectiveStart}-${effectiveStart + inputFiles.length - 1})`
+      : rangeNameProp;
+
+  // ---- Multi-folder upload queue ----
+  // Once the user commits a group to the queue the whole session is in queue
+  // mode, so later groups never see the direct-upload action again.
+  const { mode: sessionMode } = useUploadSession();
+  const queueMode = sessionMode === "queue";
+
+  function handleAddToQueue() {
+    if (!data || files.length === 0) return;
+    if (!pagesReady) {
+      toast.info("Still detecting the next page for this folder — try again in a moment.");
+      return;
+    }
+    const names = files.map((f) => f.name);
+    if (isAlreadyQueued(data.currentId, names)) {
+      toast.info(`These ${files.length} image${files.length === 1 ? "" : "s"} are already queued for "${data.currentName}".`);
+      return;
+    }
+    addGroup({
+      folderId: data.currentId,
+      folderName: data.currentName,
+      rangeName,
+      files,
+    });
+    setSessionMode("queue");
+    toast.success(`Added ${files.length} image${files.length === 1 ? "" : "s"} to the queue for "${data.currentName}". Nothing uploaded yet.`);
+    setBreadcrumb([]);
+    void loadFolder(null);
+    onQueued?.();
+  }
 
   // ---- Drive access token manager (shared + pre-warmed so uploads start instantly) ----
   const tokenCacheRef = useRef<{ accessToken: string; expiresAt: number } | null>(null);
@@ -195,12 +290,82 @@ export function DriveUpload({ files, rangeName }: Props) {
     void fetchDriveToken(data.currentId).catch(() => {});
   }, [data?.currentId, hasRole, fetchDriveToken]);
 
+  // Auto-paging: whenever the destination folder becomes known (or changes, or
+  // a new group arrives), detect the next page. Folder change clears any
+  // manual value so the new folder's default applies.
+  const autoPageOn = !!autoPage && inputFiles.length > 0;
+  const inputKey = inputFiles.map((f) => f.name).join("\u0000");
+  useEffect(() => {
+    setPageOverride("");
+    setAutoStart(null);
+    if (!data || !hasRole || !autoPageOn) return;
+    let cancelled = false;
+    const folderId = data.currentId;
+    setDetecting(true);
+    (async () => {
+      try {
+        const token = await fetchDriveToken(folderId);
+        // Pages already reserved by queued groups for this folder count too.
+        const reservedPages = getQueue()
+          .filter((g) => g.folderId === folderId)
+          .flatMap((g) => groupUploadNames(g).map(extractPageNumber))
+          .filter((p): p is number => p != null);
+        const r = await resolveStartingPage({ folderId, userProvidedPage: null, token, reservedPages });
+        if (!cancelled) setAutoStart(r.start);
+      } catch {
+        if (!cancelled) setAutoStart(1);
+      } finally {
+        if (!cancelled) setDetecting(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data?.currentId, hasRole, autoPageOn, inputKey]);
+
   // Second warm-up: the moment files are picked, make sure a fresh token is
   // already in flight so pressing Upload starts transferring instantly.
   useEffect(() => {
     if (!data || !hasRole || files.length === 0) return;
     void fetchDriveToken(data.currentId).catch(() => {});
   }, [files.length, data?.currentId, hasRole, fetchDriveToken]);
+
+  // ---- Automatic pre-upload analysis --------------------------------------
+  // Runs as soon as files are selected (or the target folder changes) so that
+  // pressing Upload never has to wait for a Drive search.
+  const filesKey = files.map((f) => f.name).join("\u0000");
+  useEffect(() => {
+    if (!data || !hasRole || files.length === 0 || uploading) {
+      if (files.length === 0) setScan(null);
+      return;
+    }
+    let cancelled = false;
+    const folderId = data.currentId;
+    const folderName = data.currentName;
+    setScanning(true);
+    (async () => {
+      try {
+        const token = await fetchDriveToken(folderId);
+        const [localFiles, driveFiles] = await Promise.all([
+          analyzeLocalFiles(files),
+          listFolderFiles(folderId, token),
+        ]);
+        if (cancelled) return;
+        setScan(classify({ folderId, folderName, localFiles, driveFiles }));
+      } catch {
+        if (!cancelled) setScan(null);
+      } finally {
+        if (!cancelled) setScanning(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filesKey, data?.currentId, hasRole]);
+
+
 
 
 
@@ -281,9 +446,13 @@ export function DriveUpload({ files, rangeName }: Props) {
     loadFolder(target.id);
   }
 
-  async function runUpload(initialCompleted: Set<string>) {
+  async function runUpload(
+    initialCompleted: Set<string>,
+    opts: { deleteLeftovers?: LeftoverCandidate[] } = {},
+  ) {
     if (!data) return;
     const folderId = data.currentId;
+    const deletedPages: number[] = [];
     const pending = files.filter((f) => !initialCompleted.has(f.name));
     if (pending.length === 0) {
       setUploadDone(`All ${files.length} file${files.length === 1 ? "" : "s"} already uploaded to "${data.currentName}".`);
@@ -298,6 +467,24 @@ export function DriveUpload({ files, rangeName }: Props) {
     setActive(new Set());
     pausedRef.current = false;
     setPaused(false);
+
+    // ---- Confirmed leftover deletion (user-approved only) ----
+    if (opts.deleteLeftovers?.length) {
+      try {
+        const token = await fetchDriveToken(folderId);
+        for (const lf of opts.deleteLeftovers) {
+          // Safety: the file must still live in THIS folder.
+          if (!(await fileIsInFolder(lf.id, folderId, token))) continue;
+          const res = await fetch(
+            `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(lf.id)}?supportsAllDrives=true`,
+            { method: "DELETE", headers: { authorization: `Bearer ${token}` } },
+          );
+          if (res.ok || res.status === 404) deletedPages.push(lf.page);
+        }
+      } catch {
+        /* deletion is best-effort; never block the upload */
+      }
+    }
 
     // Small batches should go out all at once — no artificial warm-up.
     const startConcurrency = Math.max(1, Math.min(12, pending.length));
@@ -467,7 +654,13 @@ export function DriveUpload({ files, rangeName }: Props) {
     // with the first uploads so it never delays the start of the batch.
     // After each successful upload, every OLDER file with the same name is
     // trashed, so the folder always keeps exactly the latest version.
+    const prescanned = scanRef.current;
     const existingByName = (async () => {
+      // Reuse the pre-upload scan when it targets this same folder — no
+      // repeated Drive search when the user presses Upload.
+      if (prescanned && prescanned.folderId === folderId) {
+        return new Map(Array.from(prescanned.existingByName, ([k, v]) => [k, [...v]]));
+      }
       const map = new Map<string, string[]>();
       try {
         const token = await fetchDriveToken(folderId);
@@ -502,6 +695,8 @@ export function DriveUpload({ files, rangeName }: Props) {
     })();
 
     const cleanups = new Set<Promise<void>>();
+    /** name -> newly created Drive file id, used for the batch history record. */
+    const uploadedIds = new Map<string, string>();
 
     const removeOlderDuplicates = async (name: string, keepId: string | null) => {
       const map = await existingByName;
@@ -604,6 +799,7 @@ export function DriveUpload({ files, rangeName }: Props) {
           if (attempt > 0) ctrl.retryFinished();
           ctrl.recordSuccess(Date.now() - started);
           bytesLoaded.set(name, file.size);
+          if (newId) uploadedIds.set(name, newId);
           reportProgress();
           scheduleDuplicateCleanup(name, newId ?? null);
           return;
@@ -709,14 +905,47 @@ export function DriveUpload({ files, rangeName }: Props) {
 
 
       if (!pausedRef.current) {
+        // ---- Rolling upload history (newest 10 records per folder) ----
+        if (localCompleted.size > 0) {
+          const doneNames = Array.from(localCompleted);
+          const pages = doneNames
+            .map((n) => extractPageNumber(n))
+            .filter((p): p is number => p != null);
+          // Pages whose leftover file we just deleted are no longer in the folder.
+          const livePages = pages.filter((p) => !deletedPages.includes(p));
+          const fileIds: Record<string, string> = {};
+          for (const n of doneNames) {
+            const page = extractPageNumber(n);
+            const id = uploadedIds.get(n);
+            if (page != null && id) fileIds[String(page)] = id;
+          }
+          saveBatchRecord({
+            folderId,
+            folderName: data.currentName,
+            at: Date.now(),
+            pageStart: livePages.length ? Math.min(...livePages) : null,
+            pageEnd: livePages.length ? Math.max(...livePages) : null,
+            pages: Array.from(new Set(livePages)).sort((a, b) => a - b),
+            fileIds,
+            stems: Array.from(new Set(doneNames.map((n) => filenameStem(n)).filter(Boolean))),
+            status: localFailed.size > 0 ? "partial" : "success",
+          });
+        }
+
         if (localFailed.size > 0) {
           setError(
             `${localFailed.size} file${localFailed.size === 1 ? "" : "s"} failed after retries. ${localCompleted.size} of ${files.length} uploaded — press Resume to retry only the failed ones.`,
           );
         } else {
-          setUploadDone(`Uploaded ${files.length} file${files.length === 1 ? "" : "s"} to "${data.currentName}".`);
+          const deletedNote = deletedPages.length
+            ? ` Removed ${deletedPages.length} leftover page${deletedPages.length === 1 ? "" : "s"} (${formatPages(deletedPages)}).`
+            : "";
+          setUploadDone(
+            `Uploaded ${files.length} file${files.length === 1 ? "" : "s"} to "${data.currentName}".${deletedNote}`,
+          );
           persistCompleted(folderId, new Set());
           setCompleted(new Set());
+          setScan(null);
           // Fire-and-forget Gmail notification: one email per completed batch.
           void (async () => {
             const names = files.map((f) => f.name);
@@ -743,7 +972,24 @@ export function DriveUpload({ files, rangeName }: Props) {
 
   async function handleUpload() {
     if (!data || files.length === 0) return;
+    if (!pagesReady) {
+      toast.info("Still detecting the next page for this folder — try again in a moment.");
+      return;
+    }
+    if (sessionMode === "none") setSessionMode("direct");
+    // Only interrupt when the scan found pages that look left over from a
+    // related earlier upload into this same folder.
+    if (scan && scan.folderId === data.currentId && scan.leftovers.length > 0) {
+      setConfirmOpen(true);
+      return;
+    }
     await runUpload(completed);
+  }
+
+  async function confirmUpload(deleteLeftovers: boolean) {
+    setConfirmOpen(false);
+    const leftovers = scanRef.current?.leftovers ?? [];
+    await runUpload(completed, deleteLeftovers ? { deleteLeftovers: leftovers } : {});
   }
 
   function handlePause() {
@@ -757,6 +1003,8 @@ export function DriveUpload({ files, rangeName }: Props) {
   }
 
   return (
+    <>
+    {files.length > 0 && (
     <div className="mt-6 rounded-2xl border border-border/80 bg-card/60 p-5 shadow-xl backdrop-blur-md">
       {/* Header */}
       <div className="flex items-center gap-2.5 pb-4 border-b border-border/40">
@@ -964,6 +1212,107 @@ export function DriveUpload({ files, rangeName }: Props) {
                   </Alert>
                 )}
 
+                {/* Folder-based automatic starting page (global auto-paging) */}
+                {autoPage && inputFiles.length > 0 && !uploading && (
+                  <div className="mt-3 rounded-xl border border-border/60 bg-muted/30 p-3">
+                    <label htmlFor="drive-start-page" className="text-xs font-medium text-foreground">
+                      Starting page <span className="font-normal text-muted-foreground">(optional)</span>
+                    </label>
+                    <div className="mt-1.5 flex items-center gap-2">
+                      <input
+                        id="drive-start-page"
+                        type="number"
+                        inputMode="numeric"
+                        min={0}
+                        value={pageOverride}
+                        placeholder={autoStart != null ? String(autoStart) : detecting ? "Detecting…" : "Auto"}
+                        onChange={(e) => setPageOverride(e.target.value)}
+                        className="h-9 w-28 rounded-md border border-border bg-background px-2 text-sm text-foreground outline-none focus:border-primary"
+                      />
+                      {detecting && <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />}
+                      {effectiveStart != null && (
+                        <span className="text-xs text-muted-foreground">
+                          Pages {effectiveStart}–{effectiveStart + inputFiles.length - 1}
+                        </span>
+                      )}
+                    </div>
+                    <p className="mt-1.5 text-[11px] text-muted-foreground">
+                      {overrideValid
+                        ? "Using your page number. Clear the field to use automatic numbering."
+                        : autoStart != null
+                          ? `Auto-detected next page: ${autoStart} (from "${data?.currentName ?? "folder"}")`
+                          : detecting
+                            ? "Checking this folder for the latest page…"
+                            : "Leave empty for automatic numbering from the selected folder."}
+                    </p>
+                  </div>
+                )}
+
+                {/* Pre-upload analysis status + summary chips */}
+                {files.length > 0 && !uploading && (scanning || scan) && (
+                  <div className="mt-3 rounded-xl border border-border/60 bg-muted/30 p-3">
+                    <p className="flex items-center gap-2 text-[11px] font-medium text-muted-foreground">
+                      {scanning ? (
+                        <>
+                          <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" />
+                          Analyzing selected files…
+                        </>
+                      ) : (
+                        <>
+                          <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500" />
+                          Upload analysis ready
+                        </>
+                      )}
+                    </p>
+                    {!scanning && scan && (
+                      <div className="mt-2 flex flex-wrap gap-1.5 text-[10px] font-medium">
+                        <span className="rounded-full bg-primary/10 px-2 py-0.5 text-primary">
+                          {scan.fresh.length} new
+                        </span>
+                        <span className="rounded-full bg-amber-500/10 px-2 py-0.5 text-amber-500">
+                          {scan.replace.length} will replace
+                        </span>
+                        {scan.leftovers.length > 0 && (
+                          <span className="rounded-full bg-destructive/10 px-2 py-0.5 text-destructive">
+                            {scan.leftovers.length} possible leftover ({formatPages(scan.leftovers.map((l) => l.page))})
+                          </span>
+                        )}
+                        {scan.pageStart != null && scan.pageEnd != null && (
+                          <span className="rounded-full bg-muted px-2 py-0.5 text-muted-foreground">
+                            Pages {scan.pageStart}–{scan.pageEnd}
+                          </span>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Leftover confirmation */}
+                <AlertDialog open={confirmOpen} onOpenChange={setConfirmOpen}>
+                  <AlertDialogContent>
+                    <AlertDialogHeader>
+                      <AlertDialogTitle>Possible leftover pages found</AlertDialogTitle>
+                      <AlertDialogDescription className="space-y-2">
+                        <span className="block">
+                          Your last upload to “{scan?.folderName}” included page
+                          {(scan?.leftovers.length ?? 0) === 1 ? " " : "s "}
+                          {formatPages((scan?.leftovers ?? []).map((l) => l.page))}, which this selection no longer covers.
+                        </span>
+                        <span className="block">
+                          Keep them, or delete them from the folder while uploading the new files?
+                        </span>
+                      </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <AlertDialogFooter>
+                      <AlertDialogCancel>Cancel</AlertDialogCancel>
+                      <Button variant="outline" onClick={() => void confirmUpload(false)}>
+                        Upload and Keep
+                      </Button>
+                      <Button onClick={() => void confirmUpload(true)}>Delete and Upload</Button>
+                    </AlertDialogFooter>
+                  </AlertDialogContent>
+                </AlertDialog>
+
                 {/* Action buttons */}
                 {paused ? (
                   <div className="mt-4 flex gap-2">
@@ -1007,20 +1356,45 @@ export function DriveUpload({ files, rangeName }: Props) {
                     </Button>
                   </div>
                 ) : (
-                  <Button
-                    size="lg"
-                    className={cn(
-                      "mt-4 h-12 w-full font-semibold border-0 transition-all active:scale-[0.99]",
-                      "bg-[image:var(--gradient-primary)] text-primary-foreground shadow-[var(--shadow-primary)] hover:brightness-110"
+                  <>
+                    {!queueMode && (
+                      <Button
+                        size="lg"
+                        className={cn(
+                          "mt-4 h-12 w-full font-semibold border-0 transition-all active:scale-[0.99]",
+                          "bg-[image:var(--gradient-primary)] text-primary-foreground shadow-[var(--shadow-primary)] hover:brightness-110"
+                        )}
+                        onClick={handleUpload}
+                        disabled={!data || files.length === 0}
+                      >
+                        <UploadCloud className="mr-2 h-4 w-4" />
+                        {completed.size > 0 && completed.size < files.length
+                          ? `Resume upload (${files.length - completed.size} left)`
+                          : `Upload ${files.length} file${files.length === 1 ? "" : "s"} here`}
+                      </Button>
                     )}
-                    onClick={handleUpload}
-                    disabled={!data || files.length === 0}
-                  >
-                    <UploadCloud className="mr-2 h-4 w-4" />
-                    {completed.size > 0 && completed.size < files.length
-                      ? `Resume upload (${files.length - completed.size} left)`
-                      : `Upload ${files.length} file${files.length === 1 ? "" : "s"} here`}
-                  </Button>
+                    <Button
+                      size="lg"
+                      variant={queueMode ? "default" : "outline"}
+                      className={cn(
+                        "h-11 w-full font-semibold",
+                        queueMode
+                          ? "mt-4 h-12 border-0 bg-[image:var(--gradient-primary)] text-primary-foreground shadow-[var(--shadow-primary)] hover:brightness-110"
+                          : "mt-2",
+                      )}
+                      onClick={handleAddToQueue}
+                      disabled={!data || files.length === 0}
+                    >
+                      <Layers className="mr-2 h-4 w-4" />
+                      Add to queue for "{data?.currentName ?? ""}"
+                    </Button>
+                    {queueMode && (
+                      <p className="mt-2 text-center text-[10px] text-muted-foreground">
+                        This session is in queue mode — everything uploads together from the queue
+                        below.
+                      </p>
+                    )}
+                  </>
                 )}
               </>
             )}
@@ -1028,5 +1402,16 @@ export function DriveUpload({ files, rangeName }: Props) {
         )}
       </SignedIn>
     </div>
+    )}
+    <SignedIn>
+      {hasRole && (
+        <UploadQueuePanel
+          disabled={uploading}
+          getToken={(folderId, force) => fetchDriveToken(folderId, force)}
+          getClerkToken={() => getToken().catch(() => null)}
+        />
+      )}
+    </SignedIn>
+    </>
   );
 }

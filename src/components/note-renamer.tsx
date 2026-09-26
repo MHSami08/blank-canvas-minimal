@@ -5,6 +5,7 @@ import { Footer } from "@/components/footer";
 import { DriveUpload } from "@/components/drive-upload";
 import { toast } from "sonner";
 import { collectDroppedImages } from "@/lib/collect-dropped-images";
+import { useUploadQueue, syncPageLabelLang } from "@/lib/upload-queue";
 
 import {
   DndContext,
@@ -221,6 +222,7 @@ async function centerCropFileToRatio(file: File, ext: string, ratio: number): Pr
 }
 
 export function NoteRenamer() {
+  const queuedGroups = useUploadQueue();
   const [items, setItems] = useState<ImgItem[]>([]);
   const [baseName, setBaseName] = useState("");
   const [startPage, setStartPage] = useState("");
@@ -228,6 +230,9 @@ export function NoteRenamer() {
   const [renamed, setRenamed] = useState(false);
   const [zipping, setZipping] = useState(false);
   const [lang, setLang] = useState<Lang>("bn");
+  useEffect(() => {
+    syncPageLabelLang(lang);
+  }, [lang]);
   const [lastRemoved, setLastRemoved] = useState<RemovedItem | null>(null);
   const [dupInfo, setDupInfo] = useState<{ count: number; names: string[] } | null>(null);
   const [viewerId, setViewerId] = useState<string | null>(null);
@@ -348,8 +353,13 @@ export function NoteRenamer() {
   }
 
   const startNum = Number(startPage);
-  const validStart = startPage !== "" && Number.isInteger(startNum) && startNum >= 0;
-  const computedEnd = validStart && items.length > 0 ? startNum + items.length - 1 : null;
+  const manualStart = startPage !== "" && Number.isInteger(startNum) && startNum >= 0;
+  // Empty = automatic numbering from the Drive folder; names use page 1 as a
+  // placeholder until the destination folder resolves the real start.
+  const autoStartMode = startPage.trim() === "";
+  const validStart = manualStart || autoStartMode;
+  const effStartNum = manualStart ? startNum : 1;
+  const computedEnd = manualStart && items.length > 0 ? startNum + items.length - 1 : null;
 
   const validationError = useMemo(() => {
     if (items.length === 0) return null;
@@ -364,8 +374,8 @@ export function NoteRenamer() {
 
   const previews = useMemo(() => {
     if (!baseName.trim() || !validStart) return null;
-    return items.map((it, i) => buildFileName(baseName, startNum + i, it.ext, lang));
-  }, [items, baseName, validStart, startNum, lang]);
+    return items.map((it, i) => buildFileName(baseName, effStartNum + i, it.ext, lang));
+  }, [items, baseName, validStart, effStartNum, lang]);
 
   async function handleSelectedFiles(fileList: FileList | null) {
     if (fileList && fileList.length > 0) {
@@ -553,6 +563,29 @@ export function NoteRenamer() {
     }
   }
 
+  function resetDraftAfterQueue() {
+    items.forEach(revokeItemUrls);
+    if (lastRemoved) revokeItemUrls(lastRemoved.item);
+    if (undoTimerRef.current) clearTimeout(undoTimerRef.current);
+    if (dupTimerRef.current) clearTimeout(dupTimerRef.current);
+    setItems([]);
+    setSelected(new Set());
+    setBaseName("");
+    setStartPage("");
+    setLang("bn");
+    setError(null);
+    setRenamed(false);
+    setZipping(false);
+    setLastRemoved(null);
+    setDupInfo(null);
+    setViewerId(null);
+    setCropId(null);
+    setBatchRatioOpen(false);
+    setImporting(null);
+    orderCounterRef.current = 0;
+    void clearSession();
+  }
+
   async function applyBatchRatio(ratio: number, targetIds?: Set<string>) {
     setBatchBusy(true);
     try {
@@ -642,7 +675,7 @@ export function NoteRenamer() {
     setError(null);
     if (items.length === 0) return setError("Please upload at least one image.");
     if (!baseName.trim()) return setError("Base name is required.");
-    if (!validStart) return setError("Starting page is required.");
+    if (!validStart) return setError("Starting page must be a whole number, or leave it empty.");
     if (validationError) return setError(validationError);
     setRenamed(true);
     requestAnimationFrame(() => {
@@ -657,8 +690,8 @@ export function NoteRenamer() {
       const zip = new JSZip();
       
       // ১. নতুন ও সুন্দর নামের ফরম্যাট তৈরি (যেমন: Test Page (1-3))
-      const startLabel = startNum;
-      const endLabel = computedEnd ?? startNum;
+      const startLabel = effStartNum;
+      const endLabel = effStartNum + items.length - 1;
       const customFolderName = `${baseName.trim()} Page (${startLabel}-${endLabel})`;
 
       // ২. জিপ ফাইলের ভেতরে এই নামের একটি নির্দিষ্ট ফোল্ডার তৈরি করা হচ্ছে
@@ -694,7 +727,7 @@ export function NoteRenamer() {
     items.length > 0 && baseName.trim() !== "" && validStart && !validationError;
 
   return (
-    <div className="min-h-screen bg-background text-foreground">
+    <div className="flex min-h-screen min-h-[100dvh] flex-col bg-background text-foreground">
       <div
         aria-hidden
         className="pointer-events-none fixed inset-x-0 top-0 -z-10 h-[420px] opacity-60"
@@ -720,9 +753,17 @@ export function NoteRenamer() {
         </div>
       </header>
 
-      <main className="mx-auto max-w-3xl px-4 pb-32 pt-6 lg:max-w-5xl lg:px-8">
+      <main className="mx-auto w-full max-w-3xl flex-1 px-4 pb-32 pt-6 lg:max-w-5xl lg:px-8">
         <section className="mb-8">
-          <StepHeader n={1} title="Upload images" subtitle="Order is preserved exactly as uploaded." />
+          <StepHeader
+            n={1}
+            title="Upload images"
+            subtitle={
+              items.length === 0 && queuedGroups.length > 0
+                ? "Add another group of images"
+                : "Order is preserved exactly as uploaded."
+            }
+          />
           <button
             type="button"
             onClick={() => inputRef.current?.click()}
@@ -799,7 +840,11 @@ export function NoteRenamer() {
             ) : (
               <>
                 <div className="text-sm font-medium">
-                  {dragOver ? "Release to add your images" : "Tap to select images"}
+                  {dragOver
+                    ? "Release to add your images"
+                    : items.length === 0 && queuedGroups.length > 0
+                      ? "Add another group of images"
+                      : "Tap to select images"}
                 </div>
                 <div className="hidden text-xs text-muted-foreground sm:block">
                   {dragOver
@@ -973,6 +1018,8 @@ export function NoteRenamer() {
           )}
         </section>
 
+        {items.length > 0 && (
+        <>
         <section className="mb-8">
           <StepHeader n={2} title="Rename settings" subtitle="Live preview updates as you type." />
           <div className="grid min-w-0 grid-cols-1 gap-5 rounded-2xl border border-border bg-card p-4 shadow-sm">
@@ -1002,8 +1049,7 @@ export function NoteRenamer() {
             <div className="grid grid-cols-2 gap-3">
               <FloatingField
                 id="start"
-                label="Starting page"
-                required
+                label={autoStartMode ? "Starting page (optional — auto)" : "Starting page (optional)"}
                 type="number"
                 inputMode="numeric"
                 value={startPage}
@@ -1015,7 +1061,7 @@ export function NoteRenamer() {
               <FloatingDisplay
                 id="end"
                 label="Ending page"
-                value={computedEnd !== null ? String(computedEnd) : ""}
+                value={computedEnd !== null ? String(computedEnd) : autoStartMode && items.length > 0 ? "Auto" : ""}
                 locked
               />
             </div>
@@ -1054,12 +1100,14 @@ export function NoteRenamer() {
             size="lg"
             className="h-12 w-full border-0 text-base font-semibold text-primary-foreground shadow-lg transition-all hover:brightness-105 hover:shadow-xl active:scale-[0.99] disabled:opacity-40 disabled:shadow-none"
             style={{ backgroundImage: "var(--gradient-primary)", boxShadow: "var(--shadow-primary)" }}
-            disabled={!canRename}
+            disabled={!canRename || renamed}
             onClick={handleRename}
           >
-            Rename files
+            {renamed ? "Rename complete" : "Rename files"}
           </Button>
         </section>
+        </>
+        )}
 
         {renamed && previews && (
           <section id="success-panel" className="mb-8">
@@ -1070,8 +1118,8 @@ export function NoteRenamer() {
               </div>
               <dl className="mt-4 grid grid-cols-2 gap-3 text-sm">
                 <Stat label="Total images" value={String(items.length)} />
-                <Stat label="Starting page" value={String(startNum)} />
-                <Stat label="Ending page" value={String(computedEnd)} />
+                <Stat label="Starting page" value={manualStart ? String(startNum) : "Auto (from Drive folder)"} />
+                <Stat label="Ending page" value={manualStart ? String(computedEnd) : "Auto"} />
                 <Stat label="ZIP" value="Ready" />
               </dl>
               <Button
@@ -1095,9 +1143,12 @@ export function NoteRenamer() {
                   ? `${baseName.trim()} Page (${startNum}-${computedEnd})`
                   : null
               }
+              onQueued={resetDraftAfterQueue}
+              autoPage={autoStartMode ? { baseName: baseName.trim() } : null}
             />
           </section>
         )}
+        {!renamed && <DriveUpload files={[]} rangeName={null} />}
       </main>
      <Footer />
       
