@@ -686,7 +686,12 @@ export function NoteRenamer() {
     setError(null);
     if (items.length === 0) return setError("Please upload at least one image.");
     if (!baseName.trim()) return setError("Base name is required.");
-    if (!validStart) return setError("Starting page must be a whole number, or leave it empty.");
+    if (!validStart)
+      return setError(
+        startPage !== "" && Number.isInteger(startNum) && startNum < 0
+          ? "Starting page can't be a negative number."
+          : "Starting page must be a whole number (0 or more), or leave it empty.",
+      );
     if (validationError) return setError(validationError);
     setRenamed(true);
     requestAnimationFrame(() => {
@@ -1345,6 +1350,7 @@ function FloatingField({
         value={value}
         placeholder={emptyDisplay ?? " "}
         autoComplete="off"
+        min={type === "number" ? 0 : undefined}
         onChange={(e) => onChange(e.target.value)}
         className={cn(
           "peer no-spinner h-14 w-full rounded-xl border border-border bg-background px-3 pt-5 pb-1 text-sm text-foreground outline-none transition-all focus:border-primary focus:ring-2 focus:ring-primary/30 lg:h-16 lg:text-base",

@@ -199,14 +199,11 @@ export function DriveUpload({ files: inputFiles, rangeName: rangeNameProp, onQue
   scanRef.current = scan;
 
   // ---- Global auto-paging (direct + queue share this) ----
-  // autoStart = detected from the destination folder; pageOverride = what the
-  // user typed. The user's value always wins; auto is only the default.
+  // autoStart = detected from the destination folder; falls back to page 1
+  // if detection fails. The user sets the starting page in the renamer only.
   const [autoStart, setAutoStart] = useState<number | null>(null);
-  const [detecting, setDetecting] = useState(false);
-  const [pageOverride, setPageOverride] = useState("");
-  const overrideNum = Number(pageOverride);
-  const overrideValid = pageOverride.trim() !== "" && Number.isInteger(overrideNum) && overrideNum >= 0;
-  const effectiveStart = autoPage ? (overrideValid ? overrideNum : autoStart) : null;
+  const [, setDetecting] = useState(false);
+  const effectiveStart = autoPage ? autoStart : null;
   const pagesReady = !autoPage || effectiveStart != null;
   const files = useMemo(() => {
     if (!autoPage || effectiveStart == null) return inputFiles;
@@ -296,7 +293,6 @@ export function DriveUpload({ files: inputFiles, rangeName: rangeNameProp, onQue
   const autoPageOn = !!autoPage && inputFiles.length > 0;
   const inputKey = inputFiles.map((f) => f.name).join("\u0000");
   useEffect(() => {
-    setPageOverride("");
     setAutoStart(null);
     if (!data || !hasRole || !autoPageOn) return;
     let cancelled = false;
@@ -1212,41 +1208,6 @@ export function DriveUpload({ files: inputFiles, rangeName: rangeNameProp, onQue
                   </Alert>
                 )}
 
-                {/* Folder-based automatic starting page (global auto-paging) */}
-                {autoPage && inputFiles.length > 0 && !uploading && (
-                  <div className="mt-3 rounded-xl border border-border/60 bg-muted/30 p-3">
-                    <label htmlFor="drive-start-page" className="text-xs font-medium text-foreground">
-                      Starting page <span className="font-normal text-muted-foreground">(optional)</span>
-                    </label>
-                    <div className="mt-1.5 flex items-center gap-2">
-                      <input
-                        id="drive-start-page"
-                        type="number"
-                        inputMode="numeric"
-                        min={0}
-                        value={pageOverride}
-                        placeholder={autoStart != null ? String(autoStart) : detecting ? "Detecting…" : "Auto"}
-                        onChange={(e) => setPageOverride(e.target.value)}
-                        className="h-9 w-28 rounded-md border border-border bg-background px-2 text-sm text-foreground outline-none focus:border-primary"
-                      />
-                      {detecting && <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />}
-                      {effectiveStart != null && (
-                        <span className="text-xs text-muted-foreground">
-                          Pages {effectiveStart}–{effectiveStart + inputFiles.length - 1}
-                        </span>
-                      )}
-                    </div>
-                    <p className="mt-1.5 text-[11px] text-muted-foreground">
-                      {overrideValid
-                        ? "Using your page number. Clear the field to use automatic numbering."
-                        : autoStart != null
-                          ? `Auto-detected next page: ${autoStart} (from "${data?.currentName ?? "folder"}")`
-                          : detecting
-                            ? "Checking this folder for the latest page…"
-                            : "Leave empty for automatic numbering from the selected folder."}
-                    </p>
-                  </div>
-                )}
 
                 {/* Pre-upload analysis status + summary chips */}
                 {files.length > 0 && !uploading && (scanning || scan) && (
