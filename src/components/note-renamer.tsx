@@ -764,7 +764,14 @@ export function NoteRenamer() {
         </div>
       </header>
 
-      <main className="mx-auto flex w-full max-w-3xl flex-1 flex-col px-4 pb-32 pt-6 lg:max-w-5xl lg:px-8">
+      <main
+        className={cn(
+          "mx-auto flex w-full max-w-3xl flex-1 flex-col px-4 pt-6 lg:max-w-5xl lg:px-8",
+          items.length === 0 && queuedGroups.length === 0
+            ? "pb-6 sm:pb-32"
+            : "pb-32",
+        )}
+      >
         <section className={cn("mb-8", items.length === 0 && queuedGroups.length === 0 && "max-sm:flex max-sm:flex-1 max-sm:flex-col max-sm:justify-center")}>
           <StepHeader
             n={1}
@@ -1060,10 +1067,12 @@ export function NoteRenamer() {
             <div className="grid grid-cols-2 gap-3">
               <FloatingField
                 id="start"
-                label={autoStartMode ? "Starting page (optional — auto)" : "Starting page (optional)"}
+                label="Starting page"
                 type="number"
                 inputMode="numeric"
                 value={startPage}
+                emptyDisplay="Auto"
+                alwaysFloat
                 onChange={(v) => {
                   setStartPage(v);
                   setRenamed(false);
@@ -1314,6 +1323,8 @@ function FloatingField({
   required,
   type = "text",
   inputMode,
+  emptyDisplay,
+  alwaysFloat = false,
 }: {
   id: string;
   label: string;
@@ -1322,6 +1333,8 @@ function FloatingField({
   required?: boolean;
   type?: string;
   inputMode?: "text" | "numeric";
+  emptyDisplay?: string;
+  alwaysFloat?: boolean;
 }) {
   return (
     <div className="relative">
@@ -1330,14 +1343,22 @@ function FloatingField({
         type={type}
         inputMode={inputMode}
         value={value}
-        placeholder=" "
+        placeholder={emptyDisplay ?? " "}
         autoComplete="off"
         onChange={(e) => onChange(e.target.value)}
-        className="peer no-spinner h-14 w-full rounded-xl border border-border bg-background px-3 pt-5 pb-1 text-sm text-foreground outline-none transition-all placeholder:text-transparent focus:border-primary focus:ring-2 focus:ring-primary/30 lg:h-16 lg:text-base"
+        className={cn(
+          "peer no-spinner h-14 w-full rounded-xl border border-border bg-background px-3 pt-5 pb-1 text-sm text-foreground outline-none transition-all focus:border-primary focus:ring-2 focus:ring-primary/30 lg:h-16 lg:text-base",
+          emptyDisplay ? "placeholder:text-foreground" : "placeholder:text-transparent",
+        )}
       />
       <label
         htmlFor={id}
-        className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground transition-all duration-200 peer-focus:top-3 peer-focus:-translate-y-0 peer-focus:text-[11px] peer-focus:font-medium peer-focus:text-primary peer-[:not(:placeholder-shown)]:top-3 peer-[:not(:placeholder-shown)]:-translate-y-0 peer-[:not(:placeholder-shown)]:text-[11px] peer-[:not(:placeholder-shown)]:font-medium peer-[:not(:placeholder-shown)]:text-primary"
+        className={cn(
+          "pointer-events-none absolute left-3 text-muted-foreground transition-all duration-200",
+          alwaysFloat
+            ? "top-2 text-[11px] font-medium peer-focus:text-primary"
+            : "top-1/2 -translate-y-1/2 text-sm peer-focus:top-3 peer-focus:-translate-y-0 peer-focus:text-[11px] peer-focus:font-medium peer-focus:text-primary peer-[:not(:placeholder-shown)]:top-3 peer-[:not(:placeholder-shown)]:-translate-y-0 peer-[:not(:placeholder-shown)]:text-[11px] peer-[:not(:placeholder-shown)]:font-medium peer-[:not(:placeholder-shown)]:text-primary",
+        )}
       >
         {label}{required && <span className="text-primary"> *</span>}
       </label>

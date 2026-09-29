@@ -1377,7 +1377,7 @@ export function DriveUpload({ files: inputFiles, rangeName: rangeNameProp, onQue
                       size="lg"
                       variant={queueMode ? "default" : "outline"}
                       className={cn(
-                        "h-11 w-full font-semibold",
+                        "h-11 w-full min-w-0 overflow-hidden px-3 font-semibold sm:px-8",
                         queueMode
                           ? "mt-4 h-12 border-0 bg-[image:var(--gradient-primary)] text-primary-foreground shadow-[var(--shadow-primary)] hover:brightness-110"
                           : "mt-2",
@@ -1385,8 +1385,11 @@ export function DriveUpload({ files: inputFiles, rangeName: rangeNameProp, onQue
                       onClick={handleAddToQueue}
                       disabled={!data || files.length === 0}
                     >
-                      <Layers className="mr-2 h-4 w-4" />
-                      Add to queue for "{data?.currentName ?? ""}"
+                      <Layers className="h-4 w-4 shrink-0" />
+                      <span className="shrink-0">Add to queue</span>
+                      <span className="min-w-0 truncate text-muted-foreground">
+                        · {data?.currentName ?? ""}
+                      </span>
                     </Button>
                     {queueMode && (
                       <p className="mt-2 text-center text-[10px] text-muted-foreground">
