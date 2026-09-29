@@ -41,6 +41,7 @@ import {
   listFolderFiles,
   renameWithPage,
   resolveStartingPage,
+  pageNameKey,
   saveBatchRecord,
   type LeftoverCandidate,
   type ScanResult,
