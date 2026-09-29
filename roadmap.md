@@ -1,4 +1,0 @@
-- [x] Center the empty upload area on mobile.
-- [ ] Confirm before clearing all draft photos or queued groups.
-- [ ] Shorten the mobile starting-page label.
-- [ ] Keep the Add to queue button within mobile width.
