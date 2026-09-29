@@ -139,6 +139,7 @@ export function UploadQueuePanel({
   const [scan, setScan] = useState<QueueScan | null>(null);
   const [scanning, setScanning] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
+  const [clearConfirmOpen, setClearConfirmOpen] = useState(false);
   const [uploadState, setUploadState] = useState<QueueUploadState | null>(null);
   const [uploading, setUploading] = useState(false);
   const [paused, setPaused] = useState(false);
@@ -363,11 +364,7 @@ export function UploadQueuePanel({
         </div>
         <button
           type="button"
-          onClick={() => {
-            clearQueue();
-            setScan(null);
-            setUploadState(null);
-          }}
+          onClick={() => setClearConfirmOpen(true)}
           disabled={busy}
           className="shrink-0 rounded-lg px-2 py-1 text-[11px] font-medium text-muted-foreground transition-colors hover:bg-background hover:text-destructive disabled:opacity-40"
         >
@@ -375,6 +372,30 @@ export function UploadQueuePanel({
           Clear
         </button>
       </div>
+
+      <AlertDialog open={clearConfirmOpen} onOpenChange={setClearConfirmOpen}>
+        <AlertDialogContent className="w-[calc(100%-2rem)] rounded-lg">
+          <AlertDialogHeader>
+            <AlertDialogTitle>Clear the upload queue?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This removes all {totalFiles} queued photos from {groups.length} group{groups.length === 1 ? "" : "s"}. Nothing will be uploaded.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Keep queue</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              onClick={() => {
+                clearQueue();
+                setScan(null);
+                setUploadState(null);
+              }}
+            >
+              Clear queue
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {uploadState && (
         <div className="mt-3">

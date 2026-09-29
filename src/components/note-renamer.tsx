@@ -50,6 +50,16 @@ import {
 import { Check } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { cn } from "@/lib/utils";
 import {
@@ -242,6 +252,7 @@ export function NoteRenamer() {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [restoreDialog, setRestoreDialog] = useState<SavedSession | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [clearConfirmOpen, setClearConfirmOpen] = useState(false);
   useEffect(() => {
     const h = () => setSettingsOpen(true);
     window.addEventListener("open-app-settings", h);
@@ -753,8 +764,8 @@ export function NoteRenamer() {
         </div>
       </header>
 
-      <main className="mx-auto w-full max-w-3xl flex-1 px-4 pb-32 pt-6 lg:max-w-5xl lg:px-8">
-        <section className="mb-8">
+      <main className="mx-auto flex w-full max-w-3xl flex-1 flex-col px-4 pb-32 pt-6 lg:max-w-5xl lg:px-8">
+        <section className={cn("mb-8", items.length === 0 && queuedGroups.length === 0 && "max-sm:flex max-sm:flex-1 max-sm:flex-col max-sm:justify-center")}>
           <StepHeader
             n={1}
             title="Upload images"
@@ -856,7 +867,7 @@ export function NoteRenamer() {
             )}
           </button>
 
-          <div className="mt-2 flex justify-start">
+          <div className="mt-2 flex justify-center sm:justify-start">
             <button
               type="button"
               onClick={() => folderInputRef.current?.click()}
@@ -909,7 +920,7 @@ export function NoteRenamer() {
               <div className="flex items-center gap-3">
                 <button
                   type="button"
-                  onClick={clearAll}
+                  onClick={() => setClearConfirmOpen(true)}
                   className="text-xs font-medium text-muted-foreground underline-offset-4 hover:text-destructive hover:underline"
                 >
                   Clear all
@@ -1190,6 +1201,26 @@ export function NoteRenamer() {
           onPick={(r) => applyBatchRatio(r, selected)}
         />
       )}
+
+      <AlertDialog open={clearConfirmOpen} onOpenChange={setClearConfirmOpen}>
+        <AlertDialogContent className="w-[calc(100%-2rem)] rounded-lg">
+          <AlertDialogHeader>
+            <AlertDialogTitle>Clear all photos?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This removes all {items.length} photos from the current group. Photos already in the queue will stay there.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Keep photos</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              onClick={clearAll}
+            >
+              Clear all photos
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {restoreDialog && (
         <div className="fixed inset-0 z-50 grid place-items-center bg-black/50 p-4 backdrop-blur-sm">
