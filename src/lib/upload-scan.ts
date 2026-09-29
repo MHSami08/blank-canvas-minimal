@@ -79,17 +79,33 @@ export function highestPage(files: { page: number | null }[]): number {
  * (also counting pages already reserved, e.g. by queued groups) is used.
  * Only the number is resolved here — the label language is applied later.
  */
+/** Name part of a file without extension, page label and page number — for exact-name matching. */
+export function pageNameKey(filename: string): string {
+  return normalizeDigits(filename)
+    .replace(/\.[^.]+$/, "")
+    .replace(/(Page|পৃষ্ঠা)\s*-?\s*\(?\s*\d+(\s*-\s*\d+)?\s*\)?\s*$/i, "")
+    .replace(/[\s\-_]*\d+\s*$/, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase();
+}
+
 export async function resolveStartingPage(params: {
   folderId: string;
   userProvidedPage: number | null;
   token: string;
   reservedPages?: number[];
+  baseName?: string;
 }): Promise<{ start: number; latest: number; source: "user" | "auto" }> {
-  const { folderId, userProvidedPage, token, reservedPages = [] } = params;
+  const { folderId, userProvidedPage, token, reservedPages = [], baseName } = params;
   if (userProvidedPage != null && Number.isInteger(userProvidedPage) && userProvidedPage >= 0) {
     return { start: userProvidedPage, latest: 0, source: "user" };
   }
-  const files = await listFolderFiles(folderId, token);
+  let files = await listFolderFiles(folderId, token);
+  if (baseName != null) {
+    const key = pageNameKey(baseName);
+    files = files.filter((f) => pageNameKey(f.name) === key);
+  }
   const latest = Math.max(highestPage(files), ...reservedPages, 0);
   return { start: latest + 1, latest, source: "auto" };
 }

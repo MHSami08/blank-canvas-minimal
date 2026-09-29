@@ -302,11 +302,15 @@ export function DriveUpload({ files: inputFiles, rangeName: rangeNameProp, onQue
       try {
         const token = await fetchDriveToken(folderId);
         // Pages already reserved by queued groups for this folder count too.
+        const baseName = autoPage!.baseName;
+        const key = pageNameKey(baseName);
         const reservedPages = getQueue()
           .filter((g) => g.folderId === folderId)
-          .flatMap((g) => groupUploadNames(g).map(extractPageNumber))
+          .flatMap((g) => groupUploadNames(g))
+          .filter((n) => pageNameKey(n) === key)
+          .map(extractPageNumber)
           .filter((p): p is number => p != null);
-        const r = await resolveStartingPage({ folderId, userProvidedPage: null, token, reservedPages });
+        const r = await resolveStartingPage({ folderId, userProvidedPage: null, token, reservedPages, baseName });
         if (!cancelled) setAutoStart(r.start);
       } catch {
         if (!cancelled) setAutoStart(1);
